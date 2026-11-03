@@ -1,5 +1,6 @@
 from datetime import time
 
+# Shared workout limits and timing rules.
 
 WORKOUT_DURATION_MINUTES = 60
 PLAN_HORIZON_DAYS = 10
@@ -13,3 +14,11 @@ EARLIEST_WORKOUT_START = time(7, 0)
 LATEST_WORKOUT_START = time(20, 0)
 LATEST_HIIT_START = time(9, 0)
 EVENING_START_TIME = time(17, 30)
+
+LATEST_RING_WORKOUT_MORNING_START = time(9, 0)
+LATEST_NON_RING_WORKOUT_MORNING_START = time(11, 0)
+
+# Leave an hour between a workout and a later calendar event.
+EVENT_BUFFER_MINUTES = 60
+
+RESCHEDULE_INTERVAL_MINUTES = 60
