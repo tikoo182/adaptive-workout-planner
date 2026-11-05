@@ -25,6 +25,7 @@ def schedule_next_workout(
     uses_rings: bool = False,
 ) -> PlannedWorkout | None:
     workout_type = get_next_workout_type(previous_workout_type)
+    workout_uses_rings = uses_rings or workout_type == WorkoutType.PULL
     other_workout_starts = [workout.starts_at for workout in other_workouts]
 
     available_start = find_next_available_start_in_plan(
@@ -32,7 +33,7 @@ def schedule_next_workout(
         workout_type,
         calendar_events,
         other_workout_starts,
-        uses_rings,
+        workout_uses_rings,
     )
 
     if available_start is None:
@@ -41,6 +42,7 @@ def schedule_next_workout(
     return PlannedWorkout(
         workout_type=workout_type,
         starts_at=available_start,
+        uses_rings=workout_uses_rings,
     )
 
 
@@ -255,6 +257,7 @@ def build_rolling_plan(
     calendar_events: list[tuple[datetime, datetime]],
     existing_workouts: list[PlannedWorkout],
     previous_workout_type: WorkoutType | None = None,
+    push_uses_rings: bool = False,
 ) -> list[PlannedWorkout]:
     plan_end_date = (
         first_candidate_start.date() + timedelta(days=PLAN_HORIZON_DAYS)
@@ -273,6 +276,9 @@ def build_rolling_plan(
         scheduled_type = (
             WorkoutType.RUN if is_replacement_run else rotation_type
         )
+        workout_uses_rings = scheduled_type == WorkoutType.PULL or (
+            scheduled_type == WorkoutType.PUSH and push_uses_rings
+        )
 
         other_workout_starts = [
             workout.starts_at for workout in workouts_to_check
@@ -282,6 +288,7 @@ def build_rolling_plan(
             scheduled_type,
             calendar_events,
             other_workout_starts,
+            workout_uses_rings,
         )
 
         if available_start is None or available_start.date() >= plan_end_date:
@@ -302,6 +309,7 @@ def build_rolling_plan(
         workout = PlannedWorkout(
             workout_type=scheduled_type,
             starts_at=available_start,
+            uses_rings=workout_uses_rings,
         )
         planned_workouts.append(workout)
         workouts_to_check.append(workout)
