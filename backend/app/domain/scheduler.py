@@ -13,8 +13,9 @@ from .schedule_rules import (
     PLAN_HORIZON_DAYS,
     MAX_CONSECUTIVE_WORKOUT_DAYS,
 )
-from .workout_types import WorkoutType
+from .workout_types import WORKOUT_VARIANT_ROTATIONS, WorkoutType, WorkoutVariant
 from .planned_workout import PlannedWorkout
+from .completed_workout import CompletedWorkout
 
 # Schedule the next workout in the rotation.
 def schedule_next_workout(
@@ -23,9 +24,21 @@ def schedule_next_workout(
     calendar_events: list[tuple[datetime, datetime]],
     other_workouts: list[PlannedWorkout],
     uses_rings: bool = False,
+    completed_workouts: list[CompletedWorkout] | None = None,
 ) -> PlannedWorkout | None:
     workout_type = get_next_workout_type(previous_workout_type)
-    workout_uses_rings = uses_rings or workout_type == WorkoutType.PULL
+    variant = get_next_workout_variant(
+        workout_type,
+        completed_workouts or [],
+        [],
+    )
+    if workout_type == WorkoutType.PUSH and uses_rings:
+        variant = WorkoutVariant.PUSH_DIPS
+    workout_uses_rings = (
+        uses_rings
+        or workout_type == WorkoutType.PULL
+        or variant == WorkoutVariant.PUSH_DIPS
+    )
     other_workout_starts = [workout.starts_at for workout in other_workouts]
 
     available_start = find_next_available_start_in_plan(
@@ -43,6 +56,7 @@ def schedule_next_workout(
         workout_type=workout_type,
         starts_at=available_start,
         uses_rings=workout_uses_rings,
+        variant=variant,
     )
 
 
@@ -67,6 +81,28 @@ def get_next_workout_type(
     current_position = WORKOUT_ROTATION.index(current_workout_type)
     next_position = (current_position + 1) % len(WORKOUT_ROTATION)
     return WORKOUT_ROTATION[next_position]
+
+
+# Pick the next variation after completed and already planned sessions.
+def get_next_workout_variant(
+    workout_type: WorkoutType,
+    completed_workouts: list[CompletedWorkout],
+    planned_workouts: list[PlannedWorkout],
+) -> WorkoutVariant | None:
+    variant_rotation = WORKOUT_VARIANT_ROTATIONS.get(workout_type)
+    if variant_rotation is None:
+        return None
+
+    completed_count = sum(
+        workout.workout_type == workout_type and workout.variant is not None
+        for workout in completed_workouts
+    )
+    planned_count = sum(
+        workout.workout_type == workout_type and workout.variant is not None
+        for workout in planned_workouts
+    )
+    rotation_position = (completed_count + planned_count) % len(variant_rotation)
+    return variant_rotation[rotation_position]
 
 # Check workout times against the planner rules.
 
@@ -258,12 +294,14 @@ def build_rolling_plan(
     existing_workouts: list[PlannedWorkout],
     previous_workout_type: WorkoutType | None = None,
     push_uses_rings: bool = False,
+    completed_workouts: list[CompletedWorkout] | None = None,
 ) -> list[PlannedWorkout]:
     plan_end_date = (
         first_candidate_start.date() + timedelta(days=PLAN_HORIZON_DAYS)
     )
     planned_workouts: list[PlannedWorkout] = []
     workouts_to_check = list(existing_workouts)
+    completed_workouts = completed_workouts or []
     candidate_start = first_candidate_start
     replacement_run_due = False
 
@@ -276,8 +314,16 @@ def build_rolling_plan(
         scheduled_type = (
             WorkoutType.RUN if is_replacement_run else rotation_type
         )
-        workout_uses_rings = scheduled_type == WorkoutType.PULL or (
-            scheduled_type == WorkoutType.PUSH and push_uses_rings
+        variant = get_next_workout_variant(
+            scheduled_type,
+            completed_workouts,
+            planned_workouts,
+        )
+        if scheduled_type == WorkoutType.PUSH and push_uses_rings:
+            variant = WorkoutVariant.PUSH_DIPS
+        workout_uses_rings = (
+            scheduled_type == WorkoutType.PULL
+            or variant == WorkoutVariant.PUSH_DIPS
         )
 
         other_workout_starts = [
@@ -310,6 +356,7 @@ def build_rolling_plan(
             workout_type=scheduled_type,
             starts_at=available_start,
             uses_rings=workout_uses_rings,
+            variant=variant,
         )
         planned_workouts.append(workout)
         workouts_to_check.append(workout)
