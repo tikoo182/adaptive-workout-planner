@@ -16,6 +16,7 @@ from .schedule_rules import (
 from .workout_types import WORKOUT_VARIANT_ROTATIONS, WorkoutType, WorkoutVariant
 from .planned_workout import PlannedWorkout
 from .completed_workout import CompletedWorkout
+from .scheduler_state import SchedulerState
 
 # Schedule the next workout in the rotation.
 def schedule_next_workout(
@@ -287,7 +288,7 @@ def fits_consecutive_workout_day_limit(
     return consecutive_days <= MAX_CONSECUTIVE_WORKOUT_DAYS
 
 
-# Builds a rolling plan and can replace HIIT Legs with a Run.
+# Keep the original list-returning interface for existing callers.
 def build_rolling_plan(
     first_candidate_start: datetime,
     calendar_events: list[tuple[datetime, datetime]],
@@ -296,6 +297,26 @@ def build_rolling_plan(
     push_uses_rings: bool = False,
     completed_workouts: list[CompletedWorkout] | None = None,
 ) -> list[PlannedWorkout]:
+    planned_workouts, _ = build_rolling_plan_with_state(
+        first_candidate_start=first_candidate_start,
+        calendar_events=calendar_events,
+        existing_workouts=existing_workouts,
+        state=SchedulerState(rotation_cursor=previous_workout_type),
+        push_uses_rings=push_uses_rings,
+        completed_workouts=completed_workouts,
+    )
+    return planned_workouts
+
+
+# Build a plan and return the state needed to continue it later.
+def build_rolling_plan_with_state(
+    first_candidate_start: datetime,
+    calendar_events: list[tuple[datetime, datetime]],
+    existing_workouts: list[PlannedWorkout],
+    state: SchedulerState = SchedulerState(),
+    push_uses_rings: bool = False,
+    completed_workouts: list[CompletedWorkout] | None = None,
+) -> tuple[list[PlannedWorkout], SchedulerState]:
     plan_end_date = (
         first_candidate_start.date() + timedelta(days=PLAN_HORIZON_DAYS)
     )
@@ -303,10 +324,11 @@ def build_rolling_plan(
     workouts_to_check = list(existing_workouts)
     completed_workouts = completed_workouts or []
     candidate_start = first_candidate_start
-    replacement_run_due = False
+    rotation_cursor = state.rotation_cursor
+    replacement_run_due = state.replacement_run_due
 
     while candidate_start.date() < plan_end_date:
-        rotation_type = get_next_workout_type(previous_workout_type)
+        rotation_type = get_next_workout_type(rotation_cursor)
         is_replacement_run = (
             rotation_type == WorkoutType.HIIT_LEGS
             and replacement_run_due
@@ -317,7 +339,7 @@ def build_rolling_plan(
         variant = get_next_workout_variant(
             scheduled_type,
             completed_workouts,
-            planned_workouts,
+            workouts_to_check,
         )
         if scheduled_type == WorkoutType.PUSH and push_uses_rings:
             variant = WorkoutVariant.PUSH_DIPS
@@ -357,6 +379,7 @@ def build_rolling_plan(
             starts_at=available_start,
             uses_rings=workout_uses_rings,
             variant=variant,
+            rotation_type=rotation_type,
         )
         planned_workouts.append(workout)
         workouts_to_check.append(workout)
@@ -366,7 +389,7 @@ def build_rolling_plan(
         elif rotation_type == WorkoutType.RUN:
             replacement_run_due = True
 
-        previous_workout_type = rotation_type
+        rotation_cursor = rotation_type
         candidate_start = available_start.replace(
             hour=EARLIEST_WORKOUT_START.hour,
             minute=EARLIEST_WORKOUT_START.minute,
@@ -374,4 +397,8 @@ def build_rolling_plan(
             microsecond=0,
         ) + timedelta(days=1)
 
-    return planned_workouts
+    updated_state = SchedulerState(
+        rotation_cursor=rotation_cursor,
+        replacement_run_due=replacement_run_due,
+    )
+    return planned_workouts, updated_state

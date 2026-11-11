@@ -1,14 +1,18 @@
 import unittest
-from datetime import datetime
+from unittest.mock import patch
+
+from datetime import datetime, timedelta
 
 from backend.app.domain.planned_workout import PlannedWorkout
 from backend.app.domain.completed_workout import CompletedWorkout
 from backend.app.domain.scheduler import (
     build_rolling_plan,
+    build_rolling_plan_with_state,
     get_next_workout_variant,
 )
 from backend.app.domain.workout_types import WorkoutType
 from backend.app.domain.workout_types import WorkoutVariant
+from backend.app.domain.scheduler_state import SchedulerState
 
 
 class BuildRollingPlanTests(unittest.TestCase):
@@ -294,6 +298,79 @@ class BuildRollingPlanTests(unittest.TestCase):
         self.assertEqual(first_workout.workout_type, WorkoutType.PUSH)
         self.assertTrue(first_workout.uses_rings)
         self.assertEqual(first_workout.starts_at, datetime(2026, 11, 5, 9, 0))
+
+        # Resume after a normal Run and keep its replacement due.
+    def test_resumes_replacement_run_after_rotation_run(self):
+        first_start = datetime(2026, 11, 5, 7, 0)
+
+        with patch("backend.app.domain.scheduler.PLAN_HORIZON_DAYS", 1):
+            first_plan, state = build_rolling_plan_with_state(
+                first_candidate_start=first_start,
+                calendar_events=[],
+                existing_workouts=[],
+                state=SchedulerState(rotation_cursor=WorkoutType.PUSH),
+            )
+
+        self.assertEqual(first_plan[0].workout_type, WorkoutType.RUN)
+        self.assertEqual(first_plan[0].rotation_type, WorkoutType.RUN)
+        self.assertTrue(state.replacement_run_due)
+
+        with patch("backend.app.domain.scheduler.PLAN_HORIZON_DAYS", 10):
+            resumed_plan, _ = build_rolling_plan_with_state(
+                first_candidate_start=datetime(2026, 11, 6, 7, 0),
+                calendar_events=[],
+                existing_workouts=first_plan,
+                state=state,
+            )
+
+        replacement_run = next(
+            workout
+            for workout in resumed_plan
+            if workout.rotation_type == WorkoutType.HIIT_LEGS
+        )
+        self.assertEqual(replacement_run.workout_type, WorkoutType.RUN)
+
+    # Resuming in two windows should produce the same schedule as one window.
+    def test_resumed_plan_matches_uninterrupted_plan(self):
+        plan_start = datetime(2026, 11, 5, 7, 0)
+
+        with patch("backend.app.domain.scheduler.PLAN_HORIZON_DAYS", 10):
+            full_plan, _ = build_rolling_plan_with_state(
+                first_candidate_start=plan_start,
+                calendar_events=[],
+                existing_workouts=[],
+                state=SchedulerState(),
+            )
+
+        with patch("backend.app.domain.scheduler.PLAN_HORIZON_DAYS", 5):
+            first_part, state = build_rolling_plan_with_state(
+                first_candidate_start=plan_start,
+                calendar_events=[],
+                existing_workouts=[],
+                state=SchedulerState(),
+            )
+            second_part, _ = build_rolling_plan_with_state(
+                first_candidate_start=plan_start + timedelta(days=5),
+                calendar_events=[],
+                existing_workouts=first_part,
+                state=state,
+            )
+
+        def schedule_details(workouts):
+            return [
+                (
+                    workout.starts_at,
+                    workout.workout_type,
+                    workout.variant,
+                    workout.rotation_type,
+                )
+                for workout in workouts
+            ]
+
+        self.assertEqual(
+            schedule_details(first_part + second_part),
+            schedule_details(full_plan),
+        )
 
 
 if __name__ == "__main__":

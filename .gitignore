@@ -1,0 +1,13 @@
+# Local settings and passwords
+.env
+.env.*
+!.env.example
+
+# Files Python creates while running
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# macOS Finder metadata
+.DS_Store

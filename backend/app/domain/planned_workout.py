@@ -10,3 +10,4 @@ class PlannedWorkout:
     starts_at: datetime
     uses_rings: bool = False
     variant: WorkoutVariant | None = None
+    rotation_type: WorkoutType | None = None
