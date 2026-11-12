@@ -29,6 +29,10 @@ class CompletedWorkoutRecord(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     workout_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    rotation_type: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
     variant: Mapped[str | None] = mapped_column(String(50), nullable=True)
     completed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),

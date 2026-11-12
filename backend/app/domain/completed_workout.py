@@ -9,3 +9,4 @@ class CompletedWorkout:
     workout_type: WorkoutType
     completed_at: datetime
     variant: WorkoutVariant | None = None
+    rotation_type: WorkoutType | None = None

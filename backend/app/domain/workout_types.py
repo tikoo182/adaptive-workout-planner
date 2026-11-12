@@ -1,6 +1,10 @@
 from enum import StrEnum
 
 # Workout categories understood by the planner.
+# Broad training categories used to keep the rotation balanced.
+class WorkoutCategory(StrEnum):
+    CARDIO = "cardio"
+    STRENGTH = "strength"
 
 
 class WorkoutType(StrEnum):
@@ -10,6 +14,22 @@ class WorkoutType(StrEnum):
     LEGS = "legs"
     HIIT_ABS = "hiit_abs"
     PULL = "pull"
+
+
+# Map each workout type to its training category.
+WORKOUT_CATEGORIES = {
+    WorkoutType.HIIT_LEGS: WorkoutCategory.CARDIO,
+    WorkoutType.PUSH: WorkoutCategory.STRENGTH,
+    WorkoutType.RUN: WorkoutCategory.CARDIO,
+    WorkoutType.LEGS: WorkoutCategory.STRENGTH,
+    WorkoutType.HIIT_ABS: WorkoutCategory.CARDIO,
+    WorkoutType.PULL: WorkoutCategory.STRENGTH,
+}
+
+
+# Return the category for one workout type.
+def get_workout_category(workout_type: WorkoutType) -> WorkoutCategory:
+    return WORKOUT_CATEGORIES[workout_type]
 
 
 class WorkoutVariant(StrEnum):

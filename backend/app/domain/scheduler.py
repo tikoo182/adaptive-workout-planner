@@ -105,6 +105,39 @@ def get_next_workout_variant(
     rotation_position = (completed_count + planned_count) % len(variant_rotation)
     return variant_rotation[rotation_position]
 
+
+
+# Restore rotation progress from workouts that fulfilled planned slots.
+def get_scheduler_state_from_history(
+    completed_workouts: list[CompletedWorkout],
+) -> SchedulerState:
+    rotation_cursor = None
+    replacement_run_due = False
+
+    for completed_workout in sorted(
+        completed_workouts,
+        key=lambda workout: workout.completed_at,
+    ):
+        rotation_type = completed_workout.rotation_type
+        if rotation_type is None:
+            continue
+
+        rotation_cursor = rotation_type
+
+        if rotation_type == WorkoutType.RUN:
+            replacement_run_due = True
+        elif rotation_type == WorkoutType.HIIT_LEGS:
+            replacement_run_due = False
+
+    return SchedulerState(
+        rotation_cursor=rotation_cursor,
+        replacement_run_due=replacement_run_due,
+    )
+
+
+
+
+
 # Check workout times against the planner rules.
 
 
