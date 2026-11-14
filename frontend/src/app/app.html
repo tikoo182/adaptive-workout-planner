@@ -1,0 +1,131 @@
+<!-- Shows the upcoming workouts returned by the API. -->
+<main class="page">
+  <header class="page-header">
+    <p class="eyebrow">Adaptive Workout Planner</p>
+    <h1>Upcoming workouts</h1>
+    <p>Your current rolling plan.</p>
+  </header>
+
+  @if (errorMessage()) {
+    <p class="message error" role="alert">{{ errorMessage() }}</p>
+  } @else if (workouts().length === 0) {
+    <p class="message">There are no workouts in the plan yet.</p>
+  } @else {
+    <section class="workout-list" aria-label="Upcoming workouts">
+      @for (workout of workouts(); track workout.starts_at) {
+        <article class="workout-card">
+          <div class="workout-card-header">
+            <time>{{ workout.starts_at | date: 'EEE, MMM d · h:mm a' }}</time>
+
+            @if (workout.uses_rings) {
+              <span class="badge">Rings</span>
+            }
+          </div>
+
+          <h2>{{ formatLabel(workout.workout_type) }}</h2>
+
+          @if (workout.variant) {
+            <p class="variant">{{ formatLabel(workout.variant) }}</p>
+          }
+        </article>
+      }
+    </section>
+  }
+
+  <section class="log-section" aria-labelledby="log-heading">
+    <h2 id="log-heading">Log a completed workout</h2>
+
+    <form class="log-form" (ngSubmit)="logWorkout()">
+      <label>
+        Workout you did
+        <select
+          [ngModel]="workoutType"
+          (ngModelChange)="onWorkoutTypeChange($event)"
+          name="workoutType"
+          required
+        >
+          <option value="" disabled>Choose a workout</option>
+          @for (type of workoutTypes; track type) {
+            <option [value]="type">{{ formatLabel(type) }}</option>
+          }
+        </select>
+      </label>
+
+      @if (availableVariants.length > 0) {
+        <label>
+          Variant
+          <select [(ngModel)]="variant" name="variant">
+            <option value="">No variant</option>
+            @for (option of availableVariants; track option) {
+              <option [value]="option">{{ formatLabel(option) }}</option>
+            }
+          </select>
+        </label>
+      }
+
+      <label>
+        Completed at
+        <input
+          type="datetime-local"
+          [(ngModel)]="completedAt"
+          name="completedAt"
+          required
+        />
+      </label>
+
+      <label>
+        Rotation item it fulfills (optional)
+        <select [(ngModel)]="rotationType" name="rotationType">
+          <option value="">Extra workout — keep the rotation unchanged</option>
+          @for (type of workoutTypes; track type) {
+            <option [value]="type">{{ formatLabel(type) }}</option>
+          }
+        </select>
+      </label>
+
+      <p class="form-hint">
+        The plan will rebuild starting tomorrow at 7:00 AM.
+      </p>
+
+      @if (formError) {
+        <p class="message error" role="alert">{{ formError }}</p>
+      }
+
+      @if (formMessage) {
+        <p class="message" role="status">{{ formMessage }}</p>
+      }
+
+      <button type="submit" [disabled]="isSubmitting || !workoutType">
+        {{ isSubmitting ? 'Saving…' : 'Log workout' }}
+      </button>
+    </form>
+  </section>
+
+  <section class="history" aria-labelledby="history-heading">
+    <h2 id="history-heading">Completed workouts</h2>
+
+    @if (historyError()) {
+      <p class="message error" role="alert">{{ historyError() }}</p>
+    } @else if (completedWorkouts().length === 0) {
+      <p class="message">No completed workouts yet.</p>
+    } @else {
+      <div class="workout-list">
+        @for (workout of completedWorkouts(); track workout.completed_at) {
+          <article class="workout-card">
+            <div class="workout-card-header">
+              <time>{{ workout.completed_at | date: 'EEE, MMM d · h:mm a' }}</time>
+            </div>
+
+            <h3>{{ formatLabel(workout.workout_type) }}</h3>
+
+            @if (workout.variant) {
+              <p class="variant">{{ formatLabel(workout.variant) }}</p>
+            }
+          </article>
+        }
+      </div>
+    }
+  </section>
+
+  <router-outlet />
+</main>
