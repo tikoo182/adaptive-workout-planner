@@ -19,6 +19,9 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID in .env}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:?Set GOOGLE_CLIENT_SECRET in .env}"
+      GOOGLE_TOKEN_ENCRYPTION_KEY: "${GOOGLE_TOKEN_ENCRYPTION_KEY:?Set GOOGLE_TOKEN_ENCRYPTION_KEY in .env}"
     ports:
       - "8000:8000"
     depends_on:
@@ -27,7 +30,7 @@ services:
     command:
       - sh
       - -c
-      - alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
+      - alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log
 
   db:
     image: postgres:18.6

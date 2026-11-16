@@ -1,9 +1,34 @@
 <!-- Shows the upcoming workouts returned by the API. -->
 <main class="page">
   <header class="page-header">
-    <p class="eyebrow">Adaptive Workout Planner</p>
-    <h1>Upcoming workouts</h1>
-    <p>Your current rolling plan.</p>
+    <div class="page-heading">
+      <p class="eyebrow">Adaptive Workout Planner</p>
+      <h1>Upcoming workouts</h1>
+      <p>Your current rolling plan.</p>
+    </div>
+    <div class="header-actions">
+      <button
+        class="theme-toggle"
+        type="button"
+        role="switch"
+        [attr.aria-checked]="darkMode()"
+        [attr.aria-label]="darkMode() ? 'Dark mode on' : 'Dark mode off'"
+        (click)="toggleDarkMode()"
+      >
+        <span class="switch-track" aria-hidden="true">
+          <span class="switch-thumb"></span>
+        </span>
+        <span>Dark mode</span>
+      </button>
+      <button
+        class="refresh-button"
+        type="button"
+        [disabled]="isRebuilding()"
+        (click)="refreshPlan()"
+      >
+        {{ isRebuilding() ? 'Updating…' : 'Refresh plan' }}
+      </button>
+    </div>
   </header>
 
   @if (errorMessage()) {

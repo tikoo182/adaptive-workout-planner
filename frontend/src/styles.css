@@ -1,1 +1,53 @@
-/* You can add global styles to this file, and also import other style files */
+:root {
+  color-scheme: light;
+  --page-background: #f7f8fa;
+  --surface: #fff;
+  --surface-muted: #f1f3f4;
+  --input-background: #fff;
+  --text-primary: #202124;
+  --text-secondary: #5f6368;
+  --border: #e0e3e7;
+  --border-strong: #c7cbd1;
+  --accent: #5267d8;
+  --accent-strong: #3949ab;
+  --badge-background: #eef0ff;
+  --badge-text: #3949ab;
+  --error-background: #fce8e6;
+  --error-text: #b3261e;
+  --focus-ring: #8294ff;
+  --switch-track: #9aa0a6;
+  --switch-thumb: #fff;
+}
+
+:root.dark-mode {
+  color-scheme: dark;
+  --page-background: #121417;
+  --surface: #1c2025;
+  --surface-muted: #252a31;
+  --input-background: #171a1e;
+  --text-primary: #e8eaed;
+  --text-secondary: #aeb6c2;
+  --border: #343b44;
+  --border-strong: #515a66;
+  --accent: #aab7ff;
+  --accent-strong: #586dd6;
+  --badge-background: #2b355e;
+  --badge-text: #d0d7ff;
+  --error-background: #4a2728;
+  --error-text: #ffc7c7;
+  --focus-ring: #aab7ff;
+  --switch-track: #586dd6;
+  --switch-thumb: #fff;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--page-background);
+  color: var(--text-primary);
+  transition: background-color 160ms ease, color 160ms ease;
+}

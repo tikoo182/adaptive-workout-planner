@@ -11,3 +11,5 @@ class PlannedWorkout:
     uses_rings: bool = False
     variant: WorkoutVariant | None = None
     rotation_type: WorkoutType | None = None
+    google_event_id: str | None = None
+    google_calendar_id: str | None = None

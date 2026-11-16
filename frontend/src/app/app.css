@@ -1,95 +1,165 @@
 .page {
-    max-width: 760px;
-    margin: 0 auto;
-    padding: 48px 24px;
-    font-family: Arial, sans-serif;
-    color: #202124;
-  }
-  
-  .page-header {
-    margin-bottom: 32px;
-  }
-  
-  .eyebrow {
-    color: #5267d8;
-    font-size: 0.85rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  
-  .page-header h1 {
-    margin: 8px 0;
-    font-size: 2rem;
-  }
-  
-  .page-header > p:last-child {
-    color: #5f6368;
-  }
-  
-  .workout-list {
-    display: grid;
-    gap: 16px;
-  }
-  
-  .workout-card {
-    padding: 20px;
-    border: 1px solid #e0e3e7;
-    border-radius: 12px;
-    background: #fff;
-  }
-  
-  .workout-card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    color: #5f6368;
-    font-size: 0.95rem;
-  }
-  
-  .workout-card h2 {
-    margin: 16px 0 8px;
-    font-size: 1.2rem;
-    text-transform: capitalize;
-  }
-  
-  .variant {
-    margin: 0;
-    color: #5f6368;
-  }
-  
-  .badge {
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: #eef0ff;
-    color: #3949ab;
-    font-size: 0.8rem;
-    font-weight: 700;
-  }
-  
-  .message {
-    padding: 16px;
-    border-radius: 8px;
-    background: #f1f3f4;
-  }
-  
-  .error {
-    background: #fce8e6;
-    color: #b3261e;
-  }
-  
-  @media (max-width: 520px) {
-    .page {
-      padding: 32px 16px;
-    }
-  
-    .page-header h1 {
-      font-size: 1.7rem;
-    }
-  }
+  box-sizing: border-box;
+  max-width: 760px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 48px 24px;
+  font-family: Arial, sans-serif;
+  color: var(--text-primary);
+}
 
-  .history,
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.page-heading {
+  min-width: 0;
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.page-header h1 {
+  margin: 8px 0;
+  font-size: 2rem;
+}
+
+.page-header > .page-heading > p:last-child {
+  color: var(--text-secondary);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.theme-toggle,
+.refresh-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.theme-toggle:focus-visible,
+.refresh-button:focus-visible,
+.log-form button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.switch-track {
+  display: inline-flex;
+  width: 34px;
+  height: 20px;
+  align-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--switch-track);
+  transition: background-color 160ms ease;
+}
+
+.switch-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--switch-thumb);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  transition: transform 160ms ease;
+}
+
+.theme-toggle[aria-checked='true'] .switch-track {
+  background: var(--accent);
+}
+
+.theme-toggle[aria-checked='true'] .switch-thumb {
+  transform: translateX(14px);
+}
+
+.refresh-button {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+.refresh-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.workout-list {
+  display: grid;
+  gap: 16px;
+}
+
+.workout-card {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.workout-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.workout-card h2 {
+  margin: 16px 0 8px;
+  font-size: 1.2rem;
+  text-transform: capitalize;
+}
+
+.variant {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--badge-background);
+  color: var(--badge-text);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.message {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.error {
+  background: var(--error-background);
+  color: var(--error-text);
+}
+
+.history,
 .log-section {
   margin-top: 40px;
 }
@@ -104,9 +174,9 @@
   display: grid;
   gap: 16px;
   padding: 20px;
-  border: 1px solid #e0e3e7;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .log-form label {
@@ -120,16 +190,16 @@
   box-sizing: border-box;
   width: 100%;
   padding: 11px 12px;
-  border: 1px solid #c7cbd1;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: #fff;
-  color: #202124;
+  background: var(--input-background);
+  color: var(--text-primary);
   font: inherit;
 }
 
 .form-hint {
   margin: 0;
-  color: #5f6368;
+  color: var(--text-secondary);
   font-size: 0.9rem;
 }
 
@@ -138,7 +208,7 @@
   padding: 11px 18px;
   border: 0;
   border-radius: 8px;
-  background: #3949ab;
+  background: var(--accent-strong);
   color: #fff;
   font: inherit;
   font-weight: 700;
@@ -150,7 +220,27 @@
   cursor: not-allowed;
 }
 
+@media (max-width: 620px) {
+  .page-header {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 @media (max-width: 520px) {
+  .page {
+    padding: 32px 16px;
+  }
+
+  .page-header h1 {
+    font-size: 1.7rem;
+  }
+
   .log-form button {
     width: 100%;
   }

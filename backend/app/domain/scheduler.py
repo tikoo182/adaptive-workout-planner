@@ -16,6 +16,7 @@ from .schedule_rules import (
 from .workout_types import WORKOUT_VARIANT_ROTATIONS, WorkoutType, WorkoutVariant
 from .planned_workout import PlannedWorkout
 from .completed_workout import CompletedWorkout
+from .skipped_workout import SkippedWorkout
 from .scheduler_state import SchedulerState
 
 # Schedule the next workout in the rotation.
@@ -110,18 +111,21 @@ def get_next_workout_variant(
 # Restore rotation progress from workouts that fulfilled planned slots.
 def get_scheduler_state_from_history(
     completed_workouts: list[CompletedWorkout],
+    skipped_workouts: list[SkippedWorkout] | None = None,
 ) -> SchedulerState:
     rotation_cursor = None
     replacement_run_due = False
+    history = [
+        (workout.completed_at, workout.rotation_type)
+        for workout in completed_workouts
+        if workout.rotation_type is not None
+    ]
+    history.extend(
+        (workout.skipped_at, workout.rotation_type)
+        for workout in (skipped_workouts or [])
+    )
 
-    for completed_workout in sorted(
-        completed_workouts,
-        key=lambda workout: workout.completed_at,
-    ):
-        rotation_type = completed_workout.rotation_type
-        if rotation_type is None:
-            continue
-
+    for _, rotation_type in sorted(history, key=lambda item: item[0]):
         rotation_cursor = rotation_type
 
         if rotation_type == WorkoutType.RUN:
@@ -349,6 +353,7 @@ def build_rolling_plan_with_state(
     state: SchedulerState = SchedulerState(),
     push_uses_rings: bool = False,
     completed_workouts: list[CompletedWorkout] | None = None,
+    skipped_workouts: list[SkippedWorkout] | None = None,
 ) -> tuple[list[PlannedWorkout], SchedulerState]:
     plan_end_date = (
         first_candidate_start.date() + timedelta(days=PLAN_HORIZON_DAYS)
@@ -356,11 +361,35 @@ def build_rolling_plan_with_state(
     planned_workouts: list[PlannedWorkout] = []
     workouts_to_check = list(existing_workouts)
     completed_workouts = completed_workouts or []
+    skipped_workouts = sorted(skipped_workouts or [], key=lambda item: item.skipped_at)
     candidate_start = first_candidate_start
     rotation_cursor = state.rotation_cursor
     replacement_run_due = state.replacement_run_due
 
     while candidate_start.date() < plan_end_date:
+        skipped_today = next(
+            (
+                item
+                for item in skipped_workouts
+                if item.skipped_at.date() == candidate_start.date()
+            ),
+            None,
+        )
+        if skipped_today is not None:
+            rotation_cursor = skipped_today.rotation_type
+            if rotation_cursor == WorkoutType.RUN:
+                replacement_run_due = True
+            elif rotation_cursor == WorkoutType.HIIT_LEGS:
+                replacement_run_due = False
+            skipped_workouts.remove(skipped_today)
+            candidate_start = skipped_today.skipped_at.replace(
+                hour=EARLIEST_WORKOUT_START.hour,
+                minute=EARLIEST_WORKOUT_START.minute,
+                second=0,
+                microsecond=0,
+            ) + timedelta(days=1)
+            continue
+
         rotation_type = get_next_workout_type(rotation_cursor)
         is_replacement_run = (
             rotation_type == WorkoutType.HIIT_LEGS
@@ -394,6 +423,29 @@ def build_rolling_plan_with_state(
 
         if available_start is None or available_start.date() >= plan_end_date:
             break
+
+        skipped_before_available = next(
+            (
+                item
+                for item in skipped_workouts
+                if candidate_start.date() < item.skipped_at.date() <= available_start.date()
+            ),
+            None,
+        )
+        if skipped_before_available is not None:
+            rotation_cursor = skipped_before_available.rotation_type
+            if rotation_cursor == WorkoutType.RUN:
+                replacement_run_due = True
+            elif rotation_cursor == WorkoutType.HIIT_LEGS:
+                replacement_run_due = False
+            skipped_workouts.remove(skipped_before_available)
+            candidate_start = skipped_before_available.skipped_at.replace(
+                hour=EARLIEST_WORKOUT_START.hour,
+                minute=EARLIEST_WORKOUT_START.minute,
+                second=0,
+                microsecond=0,
+            ) + timedelta(days=1)
+            continue
 
         if any(
             workout.starts_at.date() == available_start.date()
