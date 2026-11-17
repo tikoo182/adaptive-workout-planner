@@ -28,8 +28,99 @@
       >
         {{ isRebuilding() ? 'Updating…' : 'Refresh plan' }}
       </button>
+      <button class="refresh-button" type="button" (click)="toggleSettings()">
+        {{ settingsOpen() ? 'Close settings' : 'Workout settings' }}
+      </button>
     </div>
   </header>
+
+  @if (settingsOpen()) {
+    <section class="settings-panel" aria-labelledby="settings-heading">
+      <h2 id="settings-heading">Your workout setup</h2>
+      <p class="form-hint">These definitions are shared by the iPhone app and this planner.</p>
+      <button class="refresh-button keyboard-dismiss" type="button" (click)="hideSettingsKeyboard()">Hide keyboard</button>
+      @if (settingsLoading()) {
+        <p class="message" role="status">Loading your saved workout setup…</p>
+      }
+      @if (settingsError()) {
+        <div class="message error" role="alert">
+          <p>{{ settingsError() }}</p>
+          <button class="refresh-button" type="button" (click)="retrySettingsLoad()">Try again</button>
+        </div>
+      }
+      @if (plannerSettings(); as settings) {
+        <h3>Workout rotation</h3>
+        <div class="settings-list">
+          @for (id of settings.rotation; track id; let index = $index) {
+            <div class="rotation-row">
+              <span>{{ formatLabel(id) }}</span>
+              <button type="button" (click)="moveRotationItem(index, -1)" [disabled]="index === 0" aria-label="Move up">↑</button>
+              <button type="button" (click)="moveRotationItem(index, 1)" [disabled]="index === settings.rotation.length - 1" aria-label="Move down">↓</button>
+            </div>
+          }
+        </div>
+        <h3>Workout definitions</h3>
+        <div class="settings-list">
+          @for (definition of settings.workouts; track definition.id) {
+            <article class="settings-card">
+              <label>Workout name
+                <input [(ngModel)]="definition.name" [ngModelOptions]="{standalone: true}" />
+              </label>
+              <label>Category
+                <select [(ngModel)]="definition.category" [ngModelOptions]="{standalone: true}">
+                  <option value="cardio">Cardio</option><option value="strength">Strength</option><option value="other">Other</option>
+                </select>
+              </label>
+              <label>Variants, separated by commas
+                <input [ngModel]="definition.variants.join(', ')" (ngModelChange)="updateVariants(definition.id, $event)" [ngModelOptions]="{standalone: true}" />
+              </label>
+              @for (variant of uniqueVariants(definition); track variant) {
+                <fieldset class="muscle-picker"><legend>{{ formatLabel(variant) }} muscles</legend>
+                  @for (muscle of settings.muscle_groups; track muscle) {
+                    <label class="time-toggle"><input type="checkbox" [checked]="(definition.variant_muscles[variant] ?? definition.muscles).includes(muscle)" (change)="toggleVariantMuscle(definition.id, variant, muscle, $any($event.target).checked)" /><span>{{ formatLabel(muscle) }}</span></label>
+                  }
+                </fieldset>
+                <label class="time-toggle"><input type="checkbox" [checked]="definition.variant_uses_rings[variant] ?? definition.uses_rings" (change)="toggleVariantRings(definition.id, variant, $any($event.target).checked)" /><span>Uses rings</span></label>
+              }
+              @if (definition.variants.length === 0) {
+                <label class="time-toggle"><input type="checkbox" [(ngModel)]="definition.uses_rings" [ngModelOptions]="{standalone: true}" /><span>Uses rings</span></label>
+              }
+              <label class="time-toggle"><input type="checkbox" [(ngModel)]="definition.is_hiit" [ngModelOptions]="{standalone: true}" /><span>HIIT workout (morning limit)</span></label>
+              <label class="time-toggle"><input type="checkbox" [(ngModel)]="definition.enabled" [ngModelOptions]="{standalone: true}" /><span>Include in rotation</span></label>
+              <fieldset class="muscle-picker"><legend>Muscles trained</legend>
+                @for (muscle of settings.muscle_groups; track muscle) {
+                  <label class="time-toggle"><input type="checkbox" [checked]="definition.muscles.includes(muscle)" (change)="toggleDefinitionMuscle(definition.id, muscle, $any($event.target).checked)" /><span>{{ formatLabel(muscle) }}</span></label>
+                }
+              </fieldset>
+              @if (definition.id.startsWith('custom_')) {
+                <button class="refresh-button" type="button" (click)="removeWorkoutDefinition(definition.id)">Remove workout</button>
+              }
+            </article>
+          }
+        </div>
+        <section class="timing-settings">
+          <h3>Time constraints</h3>
+          <div class="timing-grid">
+            <label>Earliest start<input type="time" [(ngModel)]="settings.timing.earliest_start" [ngModelOptions]="{standalone: true}" /></label>
+            <label>Latest start<input type="time" [(ngModel)]="settings.timing.latest_start" [ngModelOptions]="{standalone: true}" /></label>
+            <label>Evening starts<input type="time" [(ngModel)]="settings.timing.evening_start" [ngModelOptions]="{standalone: true}" /></label>
+            <label>Ring workout morning limit<input type="time" [(ngModel)]="settings.timing.latest_ring_morning_start" [ngModelOptions]="{standalone: true}" /></label>
+            <label>Other morning limit<input type="time" [(ngModel)]="settings.timing.latest_non_ring_morning_start" [ngModelOptions]="{standalone: true}" /></label>
+            <label>Latest HIIT start<input type="time" [(ngModel)]="settings.timing.latest_hiit_start" [ngModelOptions]="{standalone: true}" /></label>
+            <label>Workout length (minutes)<input type="number" min="15" max="240" [(ngModel)]="settings.timing.workout_duration_minutes" [ngModelOptions]="{standalone: true}" /></label>
+            <label>Calendar buffer (minutes)<input type="number" min="0" max="240" [(ngModel)]="settings.timing.calendar_buffer_minutes" [ngModelOptions]="{standalone: true}" /></label>
+            <label>Max consecutive workout days<input type="number" min="1" max="10" [(ngModel)]="settings.timing.max_consecutive_workout_days" [ngModelOptions]="{standalone: true}" /></label>
+            <label>Muscle recovery preference (days)<input type="number" min="0" max="14" [(ngModel)]="settings.timing.muscle_recovery_days" [ngModelOptions]="{standalone: true}" /></label>
+          </div>
+        </section>
+        <div class="settings-actions">
+          <button type="button" class="refresh-button" (click)="addWorkoutDefinition()">Add workout</button>
+          <button type="button" class="refresh-button" [disabled]="isSavingSettings()" (click)="saveSettings()">{{ isSavingSettings() ? 'Saving…' : 'Save settings' }}</button>
+        </div>
+        @if (settingsMessage()) { <p class="message" role="status">{{ settingsMessage() }}</p> }
+      }
+    </section>
+  }
 
   @if (errorMessage()) {
     <p class="message error" role="alert">{{ errorMessage() }}</p>
@@ -73,13 +164,18 @@
           @for (type of workoutTypes; track type) {
             <option [value]="type">{{ formatLabel(type) }}</option>
           }
+          <option value="custom">Custom workout</option>
         </select>
       </label>
+
+      @if (workoutType === 'custom') {
+        <label>Workout name<input [(ngModel)]="customWorkoutName" name="customWorkoutName" maxlength="80" required /></label>
+      }
 
       @if (availableVariants.length > 0) {
         <label>
           Variant
-          <select [(ngModel)]="variant" name="variant">
+          <select [ngModel]="variant" (ngModelChange)="onVariantChange($event)" name="variant">
             <option value="">No variant</option>
             @for (option of availableVariants; track option) {
               <option [value]="option">{{ formatLabel(option) }}</option>
@@ -88,21 +184,56 @@
         </label>
       }
 
+      @if (muscleGroups.length > 0) {
+        <fieldset class="muscle-picker"><legend>Muscles trained</legend>
+          @for (muscle of muscleGroups; track muscle) {
+            <label class="time-toggle"><input type="checkbox" [checked]="selectedMuscles.includes(muscle)" (change)="toggleSelectedMuscle(muscle, $any($event.target).checked)" /><span>{{ formatLabel(muscle) }}</span></label>
+          }
+        </fieldset>
+      }
+
       <label>
-        Completed at
+        Started at
         <input
           type="datetime-local"
-          [(ngModel)]="completedAt"
-          name="completedAt"
+          [ngModel]="startedAt"
+          (ngModelChange)="onStartedAtChange($event)"
+          name="startedAt"
           required
         />
       </label>
+
+      <label class="time-toggle">
+        <input
+          type="checkbox"
+          [ngModel]="hasCustomEndTime"
+          (ngModelChange)="onCustomEndTimeChange($event)"
+          name="hasCustomEndTime"
+        />
+        <span>Choose a different end time</span>
+      </label>
+
+      @if (hasCustomEndTime) {
+        <label>
+          Ended at
+          <input
+            type="datetime-local"
+            [(ngModel)]="completedAt"
+            name="completedAt"
+            required
+          />
+        </label>
+      } @else {
+        <p class="form-hint">
+          Ends at {{ completedAt | date: 'h:mm a' }} · 30 minutes
+        </p>
+      }
 
       <label>
         Rotation item it fulfills (optional)
         <select [(ngModel)]="rotationType" name="rotationType">
           <option value="">Extra workout — keep the rotation unchanged</option>
-          @for (type of workoutTypes; track type) {
+          @for (type of rotationTypes; track type) {
             <option [value]="type">{{ formatLabel(type) }}</option>
           }
         </select>
@@ -138,13 +269,34 @@
         @for (workout of completedWorkouts(); track workout.completed_at) {
           <article class="workout-card">
             <div class="workout-card-header">
-              <time>{{ workout.completed_at | date: 'EEE, MMM d · h:mm a' }}</time>
+              <time>
+                @if (workout.started_at) {
+                  {{ workout.started_at | date: 'EEE, MMM d · h:mm a' }} –
+                }
+                {{ workout.completed_at | date: 'h:mm a' }}
+              </time>
             </div>
 
-            <h3>{{ formatLabel(workout.workout_type) }}</h3>
+            <h3>{{ workout.custom_name || formatLabel(workout.workout_type) }}</h3>
 
             @if (workout.variant) {
               <p class="variant">{{ formatLabel(workout.variant) }}</p>
+            }
+            @if (workout.muscles_trained.length) { <p class="variant">Muscles: {{ musclesLabel(workout.muscles_trained) }}</p> }
+            @if (workout.id) {
+              <button class="refresh-button" type="button" (click)="editWorkout(workout)">Edit workout</button>
+            }
+            @if (editingWorkout()?.id === workout.id) {
+              <div class="history-editor">
+                @if (workout.custom_name || workout.workout_type === 'custom' || workout.workout_type.startsWith('custom_')) { <label>Workout name<input [ngModel]="editingCustomName()" (ngModelChange)="updateCustomName($event)" [ngModelOptions]="{standalone: true}" /></label> }
+                <fieldset class="muscle-picker"><legend>Muscles actually trained</legend>
+                  @for (muscle of muscleGroups; track muscle) {
+                    <label class="time-toggle"><input type="checkbox" [checked]="editingMuscles().includes(muscle)" (change)="toggleEditingMuscle(muscle, $any($event.target).checked)" /><span>{{ formatLabel(muscle) }}</span></label>
+                  }
+                </fieldset>
+                @if (historySaveError()) { <p class="message error" role="alert">{{ historySaveError() }}</p> }
+                <div class="settings-actions"><button class="refresh-button" type="button" (click)="editingWorkout.set(null)">Cancel</button><button class="refresh-button" type="button" (click)="saveWorkoutCorrection()">Save changes</button></div>
+              </div>
             }
           </article>
         }

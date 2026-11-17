@@ -191,19 +191,31 @@ def _format_label(value: str) -> str:
     )
 
 
+def _enum_value(value: Any) -> str:
+    return value.value if hasattr(value, "value") else str(value)
+
+
 def _build_workout_event(
     workout: PlannedWorkout | CompletedWorkout,
     completed: bool,
 ) -> dict[str, Any]:
-    workout_type = workout.workout_type.value
-    variant = workout.variant.value if workout.variant is not None else None
-    label = _format_label(variant or workout_type)
-    starts_at = workout.completed_at if completed else workout.starts_at
-    ends_at = starts_at + timedelta(minutes=WORKOUT_DURATION_MINUTES)
+    workout_type = _enum_value(workout.workout_type)
+    variant = _enum_value(workout.variant) if workout.variant is not None else None
+    label = getattr(workout, "custom_name", None) or _format_label(variant or workout_type)
+    if completed:
+        starts_at = workout.started_at or (
+            workout.completed_at - timedelta(minutes=WORKOUT_DURATION_MINUTES)
+        )
+        ends_at = workout.completed_at
+    else:
+        starts_at = workout.starts_at
+        ends_at = starts_at + timedelta(
+            minutes=getattr(workout, "duration_minutes", WORKOUT_DURATION_MINUTES)
+        )
     title_prefix = "Completed workout" if completed else "Workout"
     description = "Logged by Adaptive Workout Planner." if completed else (
         "Scheduled by Adaptive Workout Planner.\n"
-        f"Rotation item: {_format_label((workout.rotation_type or workout.workout_type).value)}.\n"
+        f"Rotation item: {_format_label(_enum_value(workout.rotation_type or workout.workout_type))}.\n"
         + ("Gymnastic rings required." if workout.uses_rings else "")
     )
 

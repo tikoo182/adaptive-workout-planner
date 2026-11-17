@@ -14,6 +14,7 @@ class WorkoutType(StrEnum):
     LEGS = "legs"
     HIIT_ABS = "hiit_abs"
     PULL = "pull"
+    CUSTOM = "custom"
 
 
 # Map each workout type to its training category.
@@ -24,6 +25,7 @@ WORKOUT_CATEGORIES = {
     WorkoutType.LEGS: WorkoutCategory.STRENGTH,
     WorkoutType.HIIT_ABS: WorkoutCategory.CARDIO,
     WorkoutType.PULL: WorkoutCategory.STRENGTH,
+    WorkoutType.CUSTOM: WorkoutCategory.STRENGTH,
 }
 
 

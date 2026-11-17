@@ -12,6 +12,7 @@ from .schedule_rules import (
     RESCHEDULE_INTERVAL_MINUTES,
     PLAN_HORIZON_DAYS,
     MAX_CONSECUTIVE_WORKOUT_DAYS,
+    ScheduleRules,
 )
 from .workout_types import WORKOUT_VARIANT_ROTATIONS, WorkoutType, WorkoutVariant
 from .planned_workout import PlannedWorkout
@@ -75,23 +76,28 @@ WORKOUT_ROTATION = (
 
 # Move to the next workout in the rotation.
 def get_next_workout_type(
-    current_workout_type: WorkoutType | None = None,
-) -> WorkoutType:
-    if current_workout_type is None:
-        return WORKOUT_ROTATION[0]
+    current_workout_type: WorkoutType | str | None = None,
+    rotation: tuple[WorkoutType | str, ...] | None = None,
+) -> WorkoutType | str:
+    workout_rotation = rotation or WORKOUT_ROTATION
+    if current_workout_type is None or current_workout_type not in workout_rotation:
+        return workout_rotation[0]
 
-    current_position = WORKOUT_ROTATION.index(current_workout_type)
-    next_position = (current_position + 1) % len(WORKOUT_ROTATION)
-    return WORKOUT_ROTATION[next_position]
+    current_position = workout_rotation.index(current_workout_type)
+    next_position = (current_position + 1) % len(workout_rotation)
+    return workout_rotation[next_position]
 
 
 # Pick the next variation after completed and already planned sessions.
 def get_next_workout_variant(
-    workout_type: WorkoutType,
+    workout_type: WorkoutType | str,
     completed_workouts: list[CompletedWorkout],
     planned_workouts: list[PlannedWorkout],
-) -> WorkoutVariant | None:
-    variant_rotation = WORKOUT_VARIANT_ROTATIONS.get(workout_type)
+    variants_by_workout: dict[str, list[str]] | None = None,
+) -> WorkoutVariant | str | None:
+    workout_id = workout_type.value if hasattr(workout_type, "value") else workout_type
+    configured_rotation = (variants_by_workout or {}).get(workout_id)
+    variant_rotation = configured_rotation or WORKOUT_VARIANT_ROTATIONS.get(workout_type)
     if variant_rotation is None:
         return None
 
@@ -104,7 +110,80 @@ def get_next_workout_variant(
         for workout in planned_workouts
     )
     rotation_position = (completed_count + planned_count) % len(variant_rotation)
-    return variant_rotation[rotation_position]
+    selected = variant_rotation[rotation_position]
+    try:
+        return WorkoutVariant(selected)
+    except ValueError:
+        return selected
+
+
+# Prefer the next rotation item that repeats the fewest recently trained muscles.
+def get_next_workout_with_muscle_preference(
+    current_workout_type: WorkoutType | str | None,
+    rotation: tuple[WorkoutType | str, ...],
+    completed_workouts: list[CompletedWorkout],
+    muscles_by_workout: dict[str, list[str]],
+    recovery_days: int,
+    candidate_date: datetime,
+    category_by_workout: dict[str, str] | None = None,
+    planned_workouts: list[PlannedWorkout] | None = None,
+    variants_by_workout: dict[str, list[str]] | None = None,
+    variant_muscles_by_workout: dict[str, dict[str, list[str]]] | None = None,
+    push_uses_rings: bool = False,
+) -> WorkoutType | str:
+    next_type = get_next_workout_type(current_workout_type, rotation)
+    if recovery_days <= 0:
+        return next_type
+
+    recent_cutoff = candidate_date.date() - timedelta(days=recovery_days)
+    recently_trained = {
+        muscle
+        for workout in completed_workouts
+        if recent_cutoff <= workout.completed_at.date() <= candidate_date.date()
+        for muscle in workout.muscles_trained
+    }
+    if not recently_trained:
+        return next_type
+
+    start_index = rotation.index(next_type)
+    ordered_candidates = rotation[start_index:] + rotation[:start_index]
+    category_by_workout = category_by_workout or {}
+    planned_workouts = planned_workouts or []
+    variants_by_workout = variants_by_workout or {}
+    variant_muscles_by_workout = variant_muscles_by_workout or {}
+    recent_history = [
+        workout
+        for workout in completed_workouts
+        if recent_cutoff <= workout.completed_at.date() <= candidate_date.date()
+    ]
+    last_category = None
+    if recent_history:
+        latest = max(recent_history, key=lambda workout: workout.completed_at)
+        latest_type = latest.workout_type.value if hasattr(latest.workout_type, "value") else latest.workout_type
+        last_category = category_by_workout.get(latest_type)
+
+    def score(workout_type: WorkoutType | str) -> tuple[int, bool, int]:
+        next_variant = get_next_workout_variant(
+            workout_type,
+            completed_workouts,
+            planned_workouts,
+            variants_by_workout,
+        )
+        if workout_type == WorkoutType.PUSH and push_uses_rings:
+            next_variant = WorkoutVariant.PUSH_DIPS
+        variant_id = next_variant.value if hasattr(next_variant, "value") else next_variant
+        workout_id = workout_type.value if hasattr(workout_type, "value") else workout_type
+        candidate_muscles = variant_muscles_by_workout.get(workout_id, {}).get(
+            variant_id,
+            muscles_by_workout.get(workout_id, []),
+        )
+        return (
+            len(recently_trained.intersection(candidate_muscles)),
+            category_by_workout.get(workout_id) == last_category,
+            ordered_candidates.index(workout_type),
+        )
+
+    return min(ordered_candidates, key=score)
 
 
 
@@ -148,25 +227,29 @@ def get_scheduler_state_from_history(
 # Check the time limits for this workout type.
 def is_allowed_start_time(
     start_time: time,
-    workout_type: WorkoutType,
+    workout_type: WorkoutType | str,
     uses_rings: bool = False,
+    rules: ScheduleRules | None = None,
+    is_hiit: bool = False,
+    is_strength: bool = False,
 ) -> bool:
-    if not EARLIEST_WORKOUT_START <= start_time <= LATEST_WORKOUT_START:
+    rules = rules or ScheduleRules()
+    if not rules.earliest_workout_start <= start_time <= rules.latest_workout_start:
         return False
 
-    if workout_type in (WorkoutType.HIIT_LEGS, WorkoutType.HIIT_ABS):
-        return start_time <= LATEST_HIIT_START
+    if is_hiit or workout_type in (WorkoutType.HIIT_LEGS, WorkoutType.HIIT_ABS):
+        return start_time <= rules.latest_hiit_start
 
-    if workout_type == WorkoutType.PULL or uses_rings:
+    if uses_rings:
         return (
-            start_time <= LATEST_RING_WORKOUT_MORNING_START
-            or start_time >= EVENING_START_TIME
+            start_time <= rules.latest_ring_workout_morning_start
+            or start_time >= rules.evening_start_time
         )
 
-    if workout_type in (WorkoutType.PUSH, WorkoutType.LEGS):
+    if is_strength or workout_type in (WorkoutType.PUSH, WorkoutType.LEGS):
         return (
-            start_time <= LATEST_NON_RING_WORKOUT_MORNING_START
-            or start_time >= EVENING_START_TIME
+            start_time <= rules.latest_non_ring_workout_morning_start
+            or start_time >= rules.evening_start_time
         )
 
     return True
@@ -177,8 +260,10 @@ def overlaps_calendar_event(
     workout_start: datetime,
     calendar_event_start: datetime,
     calendar_event_end: datetime,
+    rules: ScheduleRules | None = None,
 ) -> bool:
-    workout_end = workout_start + timedelta(minutes=WORKOUT_DURATION_MINUTES)
+    rules = rules or ScheduleRules()
+    workout_end = workout_start + timedelta(minutes=rules.workout_duration_minutes)
 
     return (
         workout_start < calendar_event_end
@@ -191,19 +276,22 @@ def fits_around_calendar_event(
     workout_start: datetime,
     calendar_event_start: datetime,
     calendar_event_end: datetime,
+    rules: ScheduleRules | None = None,
 ) -> bool:
-    workout_end = workout_start + timedelta(minutes=WORKOUT_DURATION_MINUTES)
+    rules = rules or ScheduleRules()
+    workout_end = workout_start + timedelta(minutes=rules.workout_duration_minutes)
 
     if overlaps_calendar_event(
         workout_start,
         calendar_event_start,
         calendar_event_end,
+        rules,
     ):
         return False
 
     if calendar_event_start >= workout_end:
         workout_and_buffer_end = workout_end + timedelta(
-            minutes=EVENT_BUFFER_MINUTES
+            minutes=rules.event_buffer_minutes
         )
         return workout_and_buffer_end <= calendar_event_start
 
@@ -214,12 +302,14 @@ def fits_around_calendar_event(
 def fits_around_calendar_events(
     workout_start: datetime,
     calendar_events: list[tuple[datetime, datetime]],
+    rules: ScheduleRules | None = None,
 ) -> bool:
     return all(
         fits_around_calendar_event(
             workout_start,
             calendar_event_start,
             calendar_event_end,
+            rules,
         )
         for calendar_event_start, calendar_event_end in calendar_events
     )
@@ -228,39 +318,52 @@ def fits_around_calendar_events(
 # Combine the time, calendar, and consecutive-day checks.
 def can_schedule_workout(
     workout_start: datetime,
-    workout_type: WorkoutType,
+    workout_type: WorkoutType | str,
     calendar_events: list[tuple[datetime, datetime]],
     other_workout_starts: list[datetime],
     uses_rings: bool = False,
+    rules: ScheduleRules | None = None,
+    is_hiit: bool = False,
+    is_strength: bool = False,
 ) -> bool:
     return (
-        is_allowed_start_time(workout_start.time(), workout_type, uses_rings)
-        and fits_around_calendar_events(workout_start, calendar_events)
-        and fits_consecutive_workout_day_limit(workout_start, other_workout_starts)
+        is_allowed_start_time(
+            workout_start.time(), workout_type, uses_rings, rules,
+            is_hiit, is_strength
+        )
+        and fits_around_calendar_events(workout_start, calendar_events, rules)
+        and fits_consecutive_workout_day_limit(workout_start, other_workout_starts, rules)
     )
 
 
 # Find the first valid start time from the candidates for that day.
 def find_next_available_start(
     first_candidate_start: datetime,
-    workout_type: WorkoutType,
+    workout_type: WorkoutType | str,
     calendar_events: list[tuple[datetime, datetime]],
     other_workout_starts: list[datetime],
     uses_rings: bool = False,
+    rules: ScheduleRules | None = None,
+    is_hiit: bool = False,
+    is_strength: bool = False,
 ) -> datetime | None:
+    rules = rules or ScheduleRules()
     candidate_start = first_candidate_start
 
-    while candidate_start.time() <= LATEST_WORKOUT_START:
+    while candidate_start.time() <= rules.latest_workout_start:
         if can_schedule_workout(
             workout_start=candidate_start,
             workout_type=workout_type,
             calendar_events=calendar_events,
             other_workout_starts=other_workout_starts,
             uses_rings=uses_rings,
+            rules=rules,
+            is_hiit=is_hiit,
+            is_strength=is_strength,
         ):
             return candidate_start
 
-        candidate_start += timedelta(minutes=RESCHEDULE_INTERVAL_MINUTES)
+        candidate_start += timedelta(minutes=rules.reschedule_interval_minutes)
 
     return None
 
@@ -268,13 +371,17 @@ def find_next_available_start(
 # Search each day in the rolling plan for the next available time.
 def find_next_available_start_in_plan(
     first_candidate_start: datetime,
-    workout_type: WorkoutType,
+    workout_type: WorkoutType | str,
     calendar_events: list[tuple[datetime, datetime]],
     other_workout_starts: list[datetime],
     uses_rings: bool = False,
+    rules: ScheduleRules | None = None,
+    is_hiit: bool = False,
+    is_strength: bool = False,
 ) -> datetime | None:
+    rules = rules or ScheduleRules()
     search_start = first_candidate_start
-    plan_end_date = first_candidate_start.date() + timedelta(days=PLAN_HORIZON_DAYS)
+    plan_end_date = first_candidate_start.date() + timedelta(days=rules.plan_horizon_days)
 
     while search_start.date() < plan_end_date:
         available_start = find_next_available_start(
@@ -283,6 +390,9 @@ def find_next_available_start_in_plan(
             calendar_events,
             other_workout_starts,
             uses_rings,
+            rules,
+            is_hiit,
+            is_strength,
         )
 
         if available_start is not None:
@@ -290,8 +400,8 @@ def find_next_available_start_in_plan(
 
         search_start = (
             search_start.replace(
-                hour=EARLIEST_WORKOUT_START.hour,
-                minute=EARLIEST_WORKOUT_START.minute,
+                hour=rules.earliest_workout_start.hour,
+                minute=rules.earliest_workout_start.minute,
                 second=0,
                 microsecond=0,
             )
@@ -305,7 +415,9 @@ def find_next_available_start_in_plan(
 def fits_consecutive_workout_day_limit(
     candidate_start: datetime,
     other_workout_starts: list[datetime],
+    rules: ScheduleRules | None = None,
 ) -> bool:
+    rules = rules or ScheduleRules()
     workout_days = {workout.date() for workout in other_workout_starts}
     candidate_day = candidate_start.date()
     workout_days.add(candidate_day)
@@ -322,7 +434,7 @@ def fits_consecutive_workout_day_limit(
         consecutive_days += 1
         day_after += timedelta(days=1)
 
-    return consecutive_days <= MAX_CONSECUTIVE_WORKOUT_DAYS
+    return consecutive_days <= rules.max_consecutive_workout_days
 
 
 # Keep the original list-returning interface for existing callers.
@@ -333,6 +445,17 @@ def build_rolling_plan(
     previous_workout_type: WorkoutType | None = None,
     push_uses_rings: bool = False,
     completed_workouts: list[CompletedWorkout] | None = None,
+    rules: ScheduleRules | None = None,
+    workout_rotation: tuple[WorkoutType | str, ...] | None = None,
+    muscles_by_workout: dict[str, list[str]] | None = None,
+    muscle_recovery_days: int = 1,
+    variants_by_workout: dict[str, list[str]] | None = None,
+    category_by_workout: dict[str, str] | None = None,
+    variant_muscles_by_workout: dict[str, dict[str, list[str]]] | None = None,
+    uses_rings_by_workout: dict[str, bool] | None = None,
+    hiit_by_workout: dict[str, bool] | None = None,
+    strength_by_workout: dict[str, bool] | None = None,
+    variant_uses_rings_by_workout: dict[str, dict[str, bool]] | None = None,
 ) -> list[PlannedWorkout]:
     planned_workouts, _ = build_rolling_plan_with_state(
         first_candidate_start=first_candidate_start,
@@ -341,6 +464,17 @@ def build_rolling_plan(
         state=SchedulerState(rotation_cursor=previous_workout_type),
         push_uses_rings=push_uses_rings,
         completed_workouts=completed_workouts,
+        rules=rules,
+        workout_rotation=workout_rotation,
+        muscles_by_workout=muscles_by_workout,
+        muscle_recovery_days=muscle_recovery_days,
+        variants_by_workout=variants_by_workout,
+        category_by_workout=category_by_workout,
+        variant_muscles_by_workout=variant_muscles_by_workout,
+        uses_rings_by_workout=uses_rings_by_workout,
+        variant_uses_rings_by_workout=variant_uses_rings_by_workout,
+        hiit_by_workout=hiit_by_workout,
+        strength_by_workout=strength_by_workout,
     )
     return planned_workouts
 
@@ -354,9 +488,30 @@ def build_rolling_plan_with_state(
     push_uses_rings: bool = False,
     completed_workouts: list[CompletedWorkout] | None = None,
     skipped_workouts: list[SkippedWorkout] | None = None,
+    rules: ScheduleRules | None = None,
+    workout_rotation: tuple[WorkoutType | str, ...] | None = None,
+    muscles_by_workout: dict[str, list[str]] | None = None,
+    muscle_recovery_days: int = 1,
+    variants_by_workout: dict[str, list[str]] | None = None,
+    category_by_workout: dict[str, str] | None = None,
+    variant_muscles_by_workout: dict[str, dict[str, list[str]]] | None = None,
+    uses_rings_by_workout: dict[str, bool] | None = None,
+    hiit_by_workout: dict[str, bool] | None = None,
+    strength_by_workout: dict[str, bool] | None = None,
+    variant_uses_rings_by_workout: dict[str, dict[str, bool]] | None = None,
 ) -> tuple[list[PlannedWorkout], SchedulerState]:
+    rules = rules or ScheduleRules()
+    workout_rotation = workout_rotation or WORKOUT_ROTATION
+    muscles_by_workout = muscles_by_workout or {}
+    variants_by_workout = variants_by_workout or {}
+    category_by_workout = category_by_workout or {}
+    variant_muscles_by_workout = variant_muscles_by_workout or {}
+    uses_rings_by_workout = uses_rings_by_workout or {}
+    variant_uses_rings_by_workout = variant_uses_rings_by_workout or {}
+    hiit_by_workout = hiit_by_workout or {}
+    strength_by_workout = strength_by_workout or {}
     plan_end_date = (
-        first_candidate_start.date() + timedelta(days=PLAN_HORIZON_DAYS)
+        first_candidate_start.date() + timedelta(days=rules.plan_horizon_days)
     )
     planned_workouts: list[PlannedWorkout] = []
     workouts_to_check = list(existing_workouts)
@@ -383,14 +538,26 @@ def build_rolling_plan_with_state(
                 replacement_run_due = False
             skipped_workouts.remove(skipped_today)
             candidate_start = skipped_today.skipped_at.replace(
-                hour=EARLIEST_WORKOUT_START.hour,
-                minute=EARLIEST_WORKOUT_START.minute,
+                hour=rules.earliest_workout_start.hour,
+                minute=rules.earliest_workout_start.minute,
                 second=0,
                 microsecond=0,
             ) + timedelta(days=1)
             continue
 
-        rotation_type = get_next_workout_type(rotation_cursor)
+        rotation_type = get_next_workout_with_muscle_preference(
+            rotation_cursor,
+            workout_rotation,
+            completed_workouts,
+            muscles_by_workout,
+            muscle_recovery_days,
+            candidate_start,
+            category_by_workout,
+            workouts_to_check,
+            variants_by_workout,
+            variant_muscles_by_workout,
+            push_uses_rings,
+        )
         is_replacement_run = (
             rotation_type == WorkoutType.HIIT_LEGS
             and replacement_run_due
@@ -402,13 +569,18 @@ def build_rolling_plan_with_state(
             scheduled_type,
             completed_workouts,
             workouts_to_check,
+            variants_by_workout,
         )
         if scheduled_type == WorkoutType.PUSH and push_uses_rings:
             variant = WorkoutVariant.PUSH_DIPS
-        workout_uses_rings = (
-            scheduled_type == WorkoutType.PULL
-            or variant == WorkoutVariant.PUSH_DIPS
+        scheduled_type_id = scheduled_type.value if hasattr(scheduled_type, "value") else scheduled_type
+        variant_id = variant.value if hasattr(variant, "value") else variant
+        default_uses_rings = uses_rings_by_workout.get(
+            scheduled_type_id, scheduled_type == WorkoutType.PULL
         )
+        workout_uses_rings = variant_uses_rings_by_workout.get(
+            scheduled_type_id, {}
+        ).get(variant_id, default_uses_rings)
 
         other_workout_starts = [
             workout.starts_at for workout in workouts_to_check
@@ -419,6 +591,9 @@ def build_rolling_plan_with_state(
             calendar_events,
             other_workout_starts,
             workout_uses_rings,
+            rules,
+            hiit_by_workout.get(scheduled_type_id, False),
+            strength_by_workout.get(scheduled_type_id, False),
         )
 
         if available_start is None or available_start.date() >= plan_end_date:
@@ -440,8 +615,8 @@ def build_rolling_plan_with_state(
                 replacement_run_due = False
             skipped_workouts.remove(skipped_before_available)
             candidate_start = skipped_before_available.skipped_at.replace(
-                hour=EARLIEST_WORKOUT_START.hour,
-                minute=EARLIEST_WORKOUT_START.minute,
+                hour=rules.earliest_workout_start.hour,
+                minute=rules.earliest_workout_start.minute,
                 second=0,
                 microsecond=0,
             ) + timedelta(days=1)
@@ -452,8 +627,8 @@ def build_rolling_plan_with_state(
             for workout in workouts_to_check
         ):
             candidate_start = available_start.replace(
-                hour=EARLIEST_WORKOUT_START.hour,
-                minute=EARLIEST_WORKOUT_START.minute,
+                hour=rules.earliest_workout_start.hour,
+                minute=rules.earliest_workout_start.minute,
                 second=0,
                 microsecond=0,
             ) + timedelta(days=1)
@@ -465,6 +640,7 @@ def build_rolling_plan_with_state(
             uses_rings=workout_uses_rings,
             variant=variant,
             rotation_type=rotation_type,
+            duration_minutes=rules.workout_duration_minutes,
         )
         planned_workouts.append(workout)
         workouts_to_check.append(workout)
@@ -476,8 +652,8 @@ def build_rolling_plan_with_state(
 
         rotation_cursor = rotation_type
         candidate_start = available_start.replace(
-            hour=EARLIEST_WORKOUT_START.hour,
-            minute=EARLIEST_WORKOUT_START.minute,
+            hour=rules.earliest_workout_start.hour,
+            minute=rules.earliest_workout_start.minute,
             second=0,
             microsecond=0,
         ) + timedelta(days=1)

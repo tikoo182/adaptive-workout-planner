@@ -16,8 +16,37 @@ from ..domain.scheduler import (
 
 from ..db.repositories import save_completed_workout
 from ..domain.completed_workout import CompletedWorkout
+from ..db.models import PlannerSettingsRecord
+from ..domain.schedule_rules import ScheduleRules
+from ..domain.workout_types import WorkoutType
+from ..schemas.settings import DEFAULT_SETTINGS, PlannerSettings
 
 # Coordinates plan rebuilding and database storage.
+
+
+def _scheduler_preferences(session: Session):
+    record = session.get(PlannerSettingsRecord, 1)
+    settings = PlannerSettings.model_validate(record.settings) if record else DEFAULT_SETTINGS
+    valid_types = {item.value for item in WorkoutType if item != WorkoutType.CUSTOM}
+    enabled_ids = {item.id for item in settings.workouts if item.enabled}
+    rotation = tuple(
+        WorkoutType(item) if item in valid_types else item
+        for item in settings.rotation
+        if item in enabled_ids
+    )
+    return (
+        ScheduleRules.from_settings(settings.timing.model_dump()),
+        rotation,
+        {item.id: item.muscles for item in settings.workouts},
+        settings.timing.muscle_recovery_days,
+        {item.id: item.variants for item in settings.workouts},
+        {item.id: item.category for item in settings.workouts},
+        {item.id: item.variant_muscles for item in settings.workouts},
+        {item.id: item.uses_rings for item in settings.workouts},
+        {item.id: item.variant_uses_rings for item in settings.workouts},
+        {item.id: item.is_hiit for item in settings.workouts},
+        {item.id: item.category == "strength" for item in settings.workouts},
+    )
 
 
 # Carry old Google event references forward so rebuilds can update those events.
@@ -46,6 +75,7 @@ def rebuild_and_save_plan(
     previous_workouts: list[PlannedWorkout] | None = None,
 ) -> list[PlannedWorkout]:
     with session.begin():
+        rules, workout_rotation, muscles_by_workout, muscle_recovery_days, variants_by_workout, category_by_workout, variant_muscles_by_workout, uses_rings_by_workout, variant_uses_rings_by_workout, hiit_by_workout, strength_by_workout = _scheduler_preferences(session)
         completed_workouts = get_completed_workouts(session)
         skipped_workouts = get_skipped_workouts(session)
         historical_skips = [
@@ -71,6 +101,17 @@ def rebuild_and_save_plan(
             push_uses_rings=push_uses_rings,
             completed_workouts=completed_workouts,
             skipped_workouts=upcoming_skips,
+            rules=rules,
+            workout_rotation=workout_rotation,
+            muscles_by_workout=muscles_by_workout,
+            muscle_recovery_days=muscle_recovery_days,
+            variants_by_workout=variants_by_workout,
+            category_by_workout=category_by_workout,
+            variant_muscles_by_workout=variant_muscles_by_workout,
+            uses_rings_by_workout=uses_rings_by_workout,
+            variant_uses_rings_by_workout=variant_uses_rings_by_workout,
+            hiit_by_workout=hiit_by_workout,
+            strength_by_workout=strength_by_workout,
         )
 
         _carry_forward_calendar_event_ids(planned_workouts, previous_workouts)
@@ -92,6 +133,7 @@ def log_completed_workout_and_rebuild_plan(
 ) -> list[PlannedWorkout]:
     with session.begin():
         save_completed_workout(session, completed_workout)
+        rules, workout_rotation, muscles_by_workout, muscle_recovery_days, variants_by_workout, category_by_workout, variant_muscles_by_workout, uses_rings_by_workout, variant_uses_rings_by_workout, hiit_by_workout, strength_by_workout = _scheduler_preferences(session)
 
         completed_workouts = get_completed_workouts(session)
         skipped_workouts = get_skipped_workouts(session)
@@ -118,6 +160,17 @@ def log_completed_workout_and_rebuild_plan(
             push_uses_rings=push_uses_rings,
             completed_workouts=completed_workouts,
             skipped_workouts=upcoming_skips,
+            rules=rules,
+            workout_rotation=workout_rotation,
+            muscles_by_workout=muscles_by_workout,
+            muscle_recovery_days=muscle_recovery_days,
+            variants_by_workout=variants_by_workout,
+            category_by_workout=category_by_workout,
+            variant_muscles_by_workout=variant_muscles_by_workout,
+            uses_rings_by_workout=uses_rings_by_workout,
+            variant_uses_rings_by_workout=variant_uses_rings_by_workout,
+            hiit_by_workout=hiit_by_workout,
+            strength_by_workout=strength_by_workout,
         )
 
         _carry_forward_calendar_event_ids(planned_workouts, previous_workouts)

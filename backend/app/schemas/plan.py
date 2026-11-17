@@ -3,7 +3,6 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..domain.workout_types import WorkoutType, WorkoutVariant
 
 SONORA_TIMEZONE = ZoneInfo("America/Hermosillo")
 
@@ -43,8 +42,9 @@ class RebuildPlanRequest(BaseModel):
 class PlannedWorkoutResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    workout_type: WorkoutType
-    rotation_type: WorkoutType
-    variant: WorkoutVariant | None = None
+    workout_type: str
+    rotation_type: str
+    variant: str | None = None
     starts_at: datetime
     uses_rings: bool
+    duration_minutes: int = 60

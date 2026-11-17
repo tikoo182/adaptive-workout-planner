@@ -245,3 +245,84 @@
     width: 100%;
   }
 }
+
+
+.keyboard-dismiss {
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+  margin: 8px 0 16px;
+}
+
+.log-form label.time-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.log-form .time-toggle input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent-strong);
+}
+
+.settings-panel {
+  display: grid;
+  gap: 16px;
+  margin: 28px 0;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.settings-panel h2,
+.settings-panel h3 { margin: 0; }
+.settings-list { display: grid; gap: 12px; }
+.settings-card,
+.history-editor {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+.settings-card label,
+.timing-grid label,
+.history-editor label { display: grid; gap: 7px; font-weight: 600; }
+.settings-card input,
+.settings-card select,
+.timing-grid input,
+.history-editor input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--input-background);
+  color: var(--text-primary);
+  font: inherit;
+}
+.muscle-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.muscle-picker legend { padding: 0 5px; font-weight: 700; }
+.muscle-picker label.time-toggle { display: inline-flex; }
+.muscle-picker input[type='checkbox'] { width: 17px; height: 17px; }
+.timing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.rotation-row,
+.settings-actions { display: flex; align-items: center; gap: 8px; }
+.rotation-row { justify-content: flex-end; }
+.rotation-row span { flex: 1; }
+.rotation-row button { border: 1px solid var(--border); border-radius: 7px; background: var(--surface-muted); color: var(--text-primary); font: inherit; }
+.settings-actions { flex-wrap: wrap; }
+@media (max-width: 520px) { .timing-grid { grid-template-columns: 1fr; } }

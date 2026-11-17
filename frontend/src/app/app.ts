@@ -6,6 +6,8 @@ import { PlanService } from './plan.service';
 import type {
   CompletedWorkout,
   LogCompletedWorkoutRequest,
+  WorkoutDefinition,
+  PlannerSettings,
   PlannedWorkout,
 } from './plan.service';
 
@@ -23,34 +25,30 @@ export class App implements OnInit, OnDestroy {
   protected readonly errorMessage = signal('');
   protected readonly darkMode = signal(false);
   protected readonly isRebuilding = signal(false);
+  protected readonly plannerSettings = signal<PlannerSettings | null>(null);
+  protected readonly settingsOpen = signal(false);
+  protected readonly settingsMessage = signal('');
+  protected readonly settingsError = signal('');
+  protected readonly settingsLoading = signal(false);
+  protected readonly isSavingSettings = signal(false);
+  protected readonly editingWorkout = signal<CompletedWorkout | null>(null);
+  protected readonly editingMuscles = signal<string[]>([]);
+  protected readonly editingCustomName = signal('');
+  protected readonly historySaveError = signal('');
+  protected selectedMuscles: string[] = [];
+  protected customWorkoutName = '';
   private readonly planService = inject(PlanService);
   private rescheduleTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly rescheduleIntervalMs = 60 * 60 * 1000;
 
-  protected readonly workoutTypes = [
-    'hiit_legs',
-    'push',
-    'run',
-    'legs',
-    'hiit_abs',
-    'pull',
-  ];
-
-  protected readonly variantsByWorkout: Record<string, string[]> = {
-    push: [
-      'push_dips',
-      'push_pike_russian',
-      'push_pike_weighted',
-      'push_pike_archer',
-    ],
-    pull: ['pull_chinups_and_pullups', 'pull_dead_hangs_and_abs'],
-    legs: ['legs_lunges', 'legs_weighted_situps'],
-  };
-
   protected workoutType = '';
   protected rotationType = '';
   protected variant = '';
+  protected startedAt = this.toLocalDateTime(
+    new Date(Date.now() - 30 * 60 * 1000),
+  );
   protected completedAt = this.toLocalDateTime(new Date());
+  protected hasCustomEndTime = false;
   protected readonly firstCandidateStart = this.tomorrowAtSeven();
 
   protected isSubmitting = false;
@@ -73,6 +71,7 @@ export class App implements OnInit, OnDestroy {
     });
 
     this.loadCompletedWorkouts();
+    this.loadSettings();
   }
 
   // Restore the saved theme choice when the app opens.
@@ -211,6 +210,8 @@ export class App implements OnInit, OnDestroy {
 
   // Turns API values like "hiit_legs" into readable labels.
   protected formatLabel(value: string): string {
+    const configuredName = this.plannerSettings()?.workouts.find((item) => item.id === value)?.name;
+    if (configuredName) return configuredName;
     return value
       .split('_')
       .map((word) =>
@@ -221,14 +222,249 @@ export class App implements OnInit, OnDestroy {
 
   // Return variants for the selected workout type.
   protected get availableVariants(): string[] {
-    return this.variantsByWorkout[this.workoutType] ?? [];
+    return [...new Set(this.plannerSettings()?.workouts.find((item) => item.id === this.workoutType)?.variants ?? [])];
+  }
+
+  protected get workoutTypes(): string[] {
+    return this.plannerSettings()?.workouts.filter((item) => item.enabled).map((item) => item.id) ?? [];
+  }
+
+  protected get rotationTypes(): string[] {
+    return this.plannerSettings()?.rotation ?? [];
+  }
+
+  protected get muscleGroups(): string[] {
+    return this.plannerSettings()?.muscle_groups ?? [];
+  }
+
+  protected get selectedWorkoutDefinition() {
+    return this.plannerSettings()?.workouts.find((item) => item.id === this.workoutType);
   }
 
   // Update the related form choices when the workout type changes.
   protected onWorkoutTypeChange(workoutType: string): void {
     this.workoutType = workoutType;
     this.variant = '';
-    this.rotationType = workoutType;
+    this.rotationType = this.rotationTypes.includes(workoutType) ? workoutType : '';
+    this.customWorkoutName = '';
+    this.selectedMuscles = [...(this.plannerSettings()?.workouts.find((item) => item.id === workoutType)?.muscles ?? [])];
+    if (workoutType === 'custom') this.rotationType = '';
+  }
+
+  // Load shared workout and timing settings from the backend.
+  private loadSettings(): void {
+    this.settingsLoading.set(true);
+    this.settingsError.set('');
+    this.planService.getSettings().subscribe({
+      next: (settings) => {
+        this.plannerSettings.set(settings);
+        this.settingsLoading.set(false);
+      },
+      error: () => {
+        this.settingsLoading.set(false);
+        this.settingsError.set('Could not load workout settings. Check the API and try again.');
+      },
+    });
+  }
+
+  protected retrySettingsLoad(): void {
+    this.loadSettings();
+  }
+
+  // Add a user-defined workout to the shared catalogue.
+  protected addWorkoutDefinition(): void {
+    const settings = this.plannerSettings();
+    if (!settings) return;
+    const id = `custom_${Date.now()}`;
+    this.plannerSettings.set({
+      ...settings,
+      workouts: [...settings.workouts, { id, name: 'New workout', category: 'other', variants: [], variant_muscles: {}, variant_uses_rings: {}, muscles: [], uses_rings: false, is_hiit: false, enabled: true }],
+      rotation: [...settings.rotation, id],
+    });
+  }
+
+  protected updateVariants(workoutId: string, value: string): void {
+    const settings = this.plannerSettings();
+    if (!settings) return;
+    const variants = value.split(',').map((item) => item.trim()).filter(Boolean);
+    this.plannerSettings.set({
+      ...settings,
+      workouts: settings.workouts.map((item) => item.id === workoutId ? {
+        ...item,
+        variants,
+        variant_muscles: Object.fromEntries(Object.entries(item.variant_muscles).filter(([id]) => variants.includes(id))),
+        variant_uses_rings: Object.fromEntries(Object.entries(item.variant_uses_rings).filter(([id]) => variants.includes(id))),
+      } : item),
+    });
+  }
+
+  protected toggleVariantMuscle(workoutId: string, variant: string, muscle: string, checked: boolean): void {
+    const settings = this.plannerSettings();
+    if (!settings) return;
+    const workouts = settings.workouts.map((item) => {
+      if (item.id !== workoutId) return item;
+      const selected = item.variant_muscles[variant] ?? item.muscles;
+      return {
+        ...item,
+        variant_muscles: {
+          ...item.variant_muscles,
+          [variant]: checked ? [...new Set([...selected, muscle])] : selected.filter((value) => value !== muscle),
+        },
+      };
+    });
+    this.plannerSettings.set({ ...settings, workouts });
+  }
+
+  protected uniqueVariants(definition: WorkoutDefinition): string[] {
+    return [...new Set(definition.variants)];
+  }
+
+  protected toggleVariantRings(workoutId: string, variant: string, checked: boolean): void {
+    const settings = this.plannerSettings();
+    if (!settings) return;
+    const workouts = settings.workouts.map((item) => item.id !== workoutId ? item : {
+      ...item,
+      variant_uses_rings: { ...item.variant_uses_rings, [variant]: checked },
+    });
+    this.plannerSettings.set({ ...settings, workouts });
+  }
+
+  protected hideSettingsKeyboard(): void {
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement) activeElement.blur();
+  }
+
+  protected onVariantChange(variant: string): void {
+    this.variant = variant;
+    const definition = this.selectedWorkoutDefinition;
+    this.selectedMuscles = [...(definition?.variant_muscles[variant] ?? definition?.muscles ?? [])];
+  }
+
+  protected removeWorkoutDefinition(workoutId: string): void {
+    const settings = this.plannerSettings();
+    if (!settings) return;
+    this.plannerSettings.set({
+      ...settings,
+      workouts: settings.workouts.filter((item) => item.id !== workoutId),
+      rotation: settings.rotation.filter((item) => item !== workoutId),
+    });
+  }
+
+  protected moveRotationItem(index: number, offset: number): void {
+    const settings = this.plannerSettings();
+    if (!settings) return;
+    const target = index + offset;
+    if (target < 0 || target >= settings.rotation.length) return;
+    const rotation = [...settings.rotation];
+    [rotation[index], rotation[target]] = [rotation[target], rotation[index]];
+    this.plannerSettings.set({ ...settings, rotation });
+  }
+
+  // Keep a workout's selected muscle groups in its editable definition.
+  protected toggleDefinitionMuscle(workoutId: string, muscle: string, checked: boolean): void {
+    const settings = this.plannerSettings();
+    if (!settings) return;
+    const workouts = settings.workouts.map((item) => item.id !== workoutId ? item : {
+      ...item,
+      muscles: checked ? [...new Set([...item.muscles, muscle])] : item.muscles.filter((value) => value !== muscle),
+    });
+    this.plannerSettings.set({ ...settings, workouts });
+  }
+
+  protected toggleSelectedMuscle(muscle: string, checked: boolean): void {
+    this.selectedMuscles = checked
+      ? [...new Set([...this.selectedMuscles, muscle])]
+      : this.selectedMuscles.filter((item) => item !== muscle);
+  }
+
+  protected musclesLabel(muscles: string[]): string {
+    return muscles.map((muscle) => this.formatLabel(muscle)).join(', ');
+  }
+
+  protected toggleSettings(): void {
+    this.settingsOpen.set(!this.settingsOpen());
+  }
+
+  protected updateCustomName(value: string): void {
+    this.editingCustomName.set(value);
+  }
+
+  // Save workout definitions and schedule preferences for both apps.
+  protected saveSettings(): void {
+    const settings = this.plannerSettings();
+    if (!settings || this.isSavingSettings()) return;
+    this.isSavingSettings.set(true);
+    this.settingsError.set('');
+    this.settingsMessage.set('');
+    this.planService.saveSettings(settings).subscribe({
+      next: (saved) => {
+        this.plannerSettings.set(saved);
+        this.isSavingSettings.set(false);
+        this.settingsMessage.set('Settings saved for this planner.');
+        this.refreshPlan();
+      },
+      error: () => {
+        this.isSavingSettings.set(false);
+        this.settingsError.set('Could not save settings. Check the API.');
+      },
+    });
+  }
+
+  // Open the history editor with the saved muscle snapshot.
+  protected editWorkout(workout: CompletedWorkout): void {
+    this.editingWorkout.set(workout);
+    this.editingMuscles.set([...workout.muscles_trained]);
+    this.editingCustomName.set(workout.custom_name ?? '');
+    this.historySaveError.set('');
+  }
+
+  // Toggle one muscle in the session being corrected.
+  protected toggleEditingMuscle(muscle: string, checked: boolean): void {
+    const current = this.editingMuscles();
+    this.editingMuscles.set(checked ? [...new Set([...current, muscle])] : current.filter((item) => item !== muscle));
+  }
+
+  // Save corrected muscles so extra sessions contribute to recovery planning.
+  protected saveWorkoutCorrection(): void {
+    const workout = this.editingWorkout();
+    if (!workout?.id) return;
+    this.historySaveError.set('');
+    this.planService.correctCompletedWorkout(workout.id, {
+      workout_type: workout.workout_type,
+      variant: workout.variant ?? null,
+      rotation_type: workout.rotation_type ?? null,
+      muscles_trained: this.editingMuscles(),
+      custom_name: this.editingCustomName().trim() || null,
+    }).subscribe({
+      next: () => {
+        this.editingWorkout.set(null);
+        this.loadCompletedWorkouts();
+      },
+      error: () => this.historySaveError.set('Could not save this workout correction.'),
+    });
+  }
+
+  // Keep the end time 30 minutes after the selected start by default.
+  protected onStartedAtChange(startedAt: string): void {
+    this.startedAt = startedAt;
+    if (!this.hasCustomEndTime) {
+      this.completedAt = this.addMinutesToLocalDateTime(startedAt, 30);
+    }
+  }
+
+  // Restore the default duration when custom end-time selection is turned off.
+  protected onCustomEndTimeChange(isCustom: boolean): void {
+    this.hasCustomEndTime = isCustom;
+    if (!isCustom) {
+      this.completedAt = this.addMinutesToLocalDateTime(this.startedAt, 30);
+    }
+  }
+
+  // Add minutes while keeping the value suitable for a local date-time input.
+  private addMinutesToLocalDateTime(value: string, minutes: number): string {
+    const date = new Date(value);
+    date.setMinutes(date.getMinutes() + minutes);
+    return this.toLocalDateTime(date);
   }
 
   // Format a local date and time for a datetime-local input.
@@ -249,7 +485,7 @@ export class App implements OnInit, OnDestroy {
 
   // Save the workout, rebuild the plan, and refresh history.
   protected logWorkout(): void {
-    if (!this.workoutType || !this.completedAt) {
+    if (!this.workoutType || !this.startedAt || !this.completedAt) {
       return;
     }
 
@@ -262,11 +498,16 @@ export class App implements OnInit, OnDestroy {
     const request: LogCompletedWorkoutRequest = {
       workout_type: this.workoutType,
       completed_at: this.completedAt,
+      started_at: this.startedAt,
       variant: this.variant || null,
       rotation_type: this.rotationType || null,
       first_candidate_start: this.firstCandidateStart,
       calendar_events: [],
       push_uses_rings: false,
+      muscles_trained: this.selectedMuscles,
+      custom_name: this.workoutType === 'custom'
+        ? this.customWorkoutName.trim() || null
+        : this.selectedWorkoutDefinition?.name ?? null,
     };
 
     this.isSubmitting = true;

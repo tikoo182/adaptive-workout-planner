@@ -1,72 +1,53 @@
 # Adaptive Workout Planner
 
-A personal workout planner with a rolling schedule, workout history, Google Calendar conflict checks, and a browser interface. The app currently runs locally with Docker Compose. Apple Watch / HealthKit import is not implemented yet; completed workouts can be logged in the app manually.
+A local web app that builds a flexible workout plan around your schedule.
 
-## What you need
+## What it does
+
+- Builds a rolling 10-day workout plan from your configurable workout rotation.
+- Uses workout variants, time constraints, calendar conflicts, and recent muscle groups when planning.
+- Logs completed workouts with start and end times, tracks history, and lets you correct workout details.
+- Syncs planned and completed workouts with a selected Google Calendar.
+- Runs as a full stack app with Angular, FastAPI, PostgreSQL, and Docker Compose.
+
+This repository currently contains the browser beta. Mobile and wearable integrations are outside this beta.
+
+## Requirements
 
 - Docker Desktop
 - A Google Cloud project with the Google Calendar API enabled
-- Google OAuth credentials for a **Web application**
+- Google OAuth credentials for a Web application
 
 ## First-time setup
 
-1. From the project root, copy `.env.example` to `.env`.
-2. Fill in the values in `.env`:
-   - `POSTGRES_PASSWORD`: a local database password of your choice.
-   - `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`: from your Google Cloud OAuth client.
-   - `GOOGLE_TOKEN_ENCRYPTION_KEY`: generate a Fernet key with Python:
-
-     ```sh
-     python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
-     ```
-
-3. In Google Cloud, configure the OAuth consent screen. While the app is in testing, add the Google account you will use as a test user.
-4. Add this exact authorized redirect URI to the OAuth client:
-
-   ```text
-   http://localhost:8000/auth/google/callback
-   ```
-
-5. Start Docker Desktop, then run from the project root:
+1. Copy `.env.example` to `.env` in the project root.
+2. Set `POSTGRES_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_TOKEN_ENCRYPTION_KEY`.
+3. Generate a Fernet key for `GOOGLE_TOKEN_ENCRYPTION_KEY`:
 
    ```sh
-   docker compose up --build
+   python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
    ```
 
-   The API applies database migrations when it starts. The first build can take a few minutes.
+4. Add `http://localhost:8000/auth/google/callback` as an authorized redirect URI in your Google OAuth client.
 
-## Open the app
+## Run the app
 
-- Planner: <http://localhost:4200>
-- API documentation: <http://localhost:8000/docs>
-- API health check: <http://localhost:8000/health>
-
-Connect Google Calendar from the app, choose the calendar where workouts should be created, then refresh the plan after calendar changes. Calendar events are checked for conflicts when the plan is rebuilt. The current app does not continuously watch Google Calendar in the background.
-
-## Stop and restart
-
-Stop the running services with `Ctrl+C`, or from another terminal in the project root run:
+From the project root, start Docker Desktop and run:
 
 ```sh
-docker compose down
+docker compose up --build
 ```
 
-Start them again with `docker compose up`. PostgreSQL data is kept in the `postgres_data` Docker volume, so stopping the services does not erase workout history or calendar connection data.
+Open the planner at <http://localhost:4200>. The API documentation is at <http://localhost:8000/docs>.
 
-To remove the database and all saved app data as well, run:
+The API applies database migrations on startup. Connect Google Calendar in the planner and choose the calendar where workout events should be created. Refresh the plan after making calendar changes.
 
-```sh
-docker compose down --volumes
-```
+## Project structure
 
-This permanently deletes the local database contents.
+- `backend/` — FastAPI API, scheduling logic, database models, and migrations
+- `frontend/` — Angular browser app
+- `compose.yaml` — PostgreSQL, API, and frontend containers
 
-## Keep credentials private
+## Current scope
 
-`.env` contains passwords and Google credentials. Do not commit it or share its contents. Use `.env.example` as the safe template; it contains placeholders only.
-
-## Current limits
-
-- Calendar updates are applied when you refresh or rebuild the plan; automatic background calendar monitoring is not implemented.
-- Apple Watch workouts are not imported yet. The app currently supports manual workout logging.
-- This setup is for local development, not public production hosting.
+This is a personal beta focused on the browser workflow and local Docker setup. Google OAuth must be configured for the account used to run it.

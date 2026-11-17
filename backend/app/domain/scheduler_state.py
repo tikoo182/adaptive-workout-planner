@@ -5,5 +5,5 @@ from .workout_types import WorkoutType
 # Tracks where the rotation should continue.
 @dataclass(frozen=True)
 class SchedulerState:
-    rotation_cursor: WorkoutType | None = None
+    rotation_cursor: WorkoutType | str | None = None
     replacement_run_due: bool = False

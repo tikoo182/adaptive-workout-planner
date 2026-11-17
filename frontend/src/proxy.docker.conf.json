@@ -6,5 +6,9 @@
     "/completed-workouts": {
       "target": "http://api:8000",
       "secure": false
+    },
+    "/settings": {
+      "target": "http://api:8000",
+      "secure": false
     }
   }

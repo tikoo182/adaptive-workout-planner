@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -10,6 +12,30 @@ from ..domain.skipped_workout import SkippedWorkout
 from .models import PlannedWorkoutRecord
 from .models import GoogleCalendarConnectionRecord, SkippedWorkoutRecord
 
+
+def _stored_value(value):
+    return value.value if hasattr(value, "value") else value
+
+
+def _completed_type(value: str) -> WorkoutType | str:
+    try:
+        return WorkoutType(value)
+    except ValueError:
+        return value
+
+
+def _rotation_type(value: str | None) -> WorkoutType | str | None:
+    return _completed_type(value) if value is not None else None
+
+
+def _completed_variant(value: str | None) -> WorkoutVariant | str | None:
+    if value is None:
+        return None
+    try:
+        return WorkoutVariant(value)
+    except ValueError:
+        return value
+
 # Save and retrieve completed workout history.
 # Save one completed workout without committing the whole transaction.
 def save_completed_workout(
@@ -17,16 +43,23 @@ def save_completed_workout(
     workout: CompletedWorkout,
 ) -> int:
     record = CompletedWorkoutRecord(
-        workout_type=workout.workout_type.value,
+        workout_type=_stored_value(workout.workout_type),
         rotation_type=(
-            workout.rotation_type.value
+            _stored_value(workout.rotation_type)
             if workout.rotation_type is not None
             else None
         ),
-        variant=workout.variant.value if workout.variant is not None else None,
+        variant=_stored_value(workout.variant) if workout.variant is not None else None,
+        started_at=(
+            workout.started_at
+            if workout.started_at is not None
+            else workout.completed_at - timedelta(minutes=30)
+        ),
         completed_at=workout.completed_at,
         google_event_id=workout.google_event_id,
         google_calendar_id=workout.google_calendar_id,
+        muscles_trained=list(workout.muscles_trained),
+        custom_name=workout.custom_name,
     )
     session.add(record)
     session.flush()
@@ -44,23 +77,27 @@ def get_completed_workouts(session: Session) -> list[CompletedWorkout]:
 
     return [
         CompletedWorkout(
-            workout_type=WorkoutType(record.workout_type),
+            workout_type=_completed_type(record.workout_type),
             rotation_type=(
-                WorkoutType(record.rotation_type)
+                _rotation_type(record.rotation_type)
                 if record.rotation_type is not None
                 else None
             ),
             completed_at=record.completed_at,
+            started_at=record.started_at,
             variant=(
-                WorkoutVariant(record.variant)
-                if record.variant is not None
-                else None
+                _completed_variant(record.variant)
+                if record.variant is not None else None
             ),
             google_event_id=record.google_event_id,
             google_calendar_id=record.google_calendar_id,
+            id=record.id,
+            muscles_trained=tuple(record.muscles_trained or []),
+            custom_name=record.custom_name,
         )
         for record in records
     ]
+
 
 # Save one planned workout without committing the whole transaction.
 def save_planned_workout(
@@ -68,12 +105,13 @@ def save_planned_workout(
     workout: PlannedWorkout,
 ) -> int:
     record = PlannedWorkoutRecord(
-        workout_type=workout.workout_type.value,
+        workout_type=_stored_value(workout.workout_type),
         rotation_type=(
-            workout.rotation_type or workout.workout_type
-        ).value,
-        variant=workout.variant.value if workout.variant is not None else None,
+            _stored_value(workout.rotation_type or workout.workout_type)
+        ),
+        variant=_stored_value(workout.variant) if workout.variant is not None else None,
         starts_at=workout.starts_at,
+        duration_minutes=workout.duration_minutes,
         uses_rings=workout.uses_rings,
         google_event_id=workout.google_event_id,
         google_calendar_id=workout.google_calendar_id,
@@ -94,15 +132,12 @@ def get_planned_workouts(session: Session) -> list[PlannedWorkout]:
 
     return [
         PlannedWorkout(
-            workout_type=WorkoutType(record.workout_type),
+            workout_type=_completed_type(record.workout_type),
             starts_at=record.starts_at,
+            duration_minutes=record.duration_minutes,
             uses_rings=record.uses_rings,
-            variant=(
-                WorkoutVariant(record.variant)
-                if record.variant is not None
-                else None
-            ),
-            rotation_type=WorkoutType(record.rotation_type),
+            variant=_completed_variant(record.variant),
+            rotation_type=_completed_type(record.rotation_type),
             google_event_id=record.google_event_id,
             google_calendar_id=record.google_calendar_id,
         )
@@ -182,8 +217,8 @@ def get_skipped_workouts(session: Session) -> list[SkippedWorkout]:
     ).all()
     return [
         SkippedWorkout(
-            workout_type=WorkoutType(record.workout_type),
-            rotation_type=WorkoutType(record.rotation_type),
+            workout_type=_completed_type(record.workout_type),
+            rotation_type=_completed_type(record.rotation_type),
             skipped_at=record.skipped_at,
             google_event_id=record.google_event_id,
         )
@@ -206,8 +241,8 @@ def save_skipped_workout(
 
     session.add(
         SkippedWorkoutRecord(
-            workout_type=workout.workout_type.value,
-            rotation_type=workout.rotation_type.value,
+            workout_type=_stored_value(workout.workout_type),
+            rotation_type=_stored_value(workout.rotation_type),
             skipped_at=workout.skipped_at,
             google_event_id=workout.google_event_id,
         )
