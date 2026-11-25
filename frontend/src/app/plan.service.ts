@@ -20,6 +20,8 @@ export interface CompletedWorkout {
   completed_at: string;
   started_at?: string | null;
   id?: number;
+  healthkit_id?: string | null;
+  source_activity?: string | null;
   muscles_trained: string[];
   custom_name?: string | null;
 }
@@ -51,6 +53,7 @@ export interface PlannerSettings {
     calendar_buffer_minutes: number;
     max_consecutive_workout_days: number;
     muscle_recovery_days: number;
+    prefer_sunday_runs: boolean;
   };
   muscle_groups: string[];
 }

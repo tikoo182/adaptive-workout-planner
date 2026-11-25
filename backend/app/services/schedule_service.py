@@ -91,6 +91,7 @@ def rebuild_and_save_plan(
         state = get_scheduler_state_from_history(
             completed_workouts,
             historical_skips,
+            category_by_workout,
         )
 
         planned_workouts, _ = build_rolling_plan_with_state(
@@ -150,6 +151,7 @@ def log_completed_workout_and_rebuild_plan(
         state = get_scheduler_state_from_history(
             completed_workouts,
             historical_skips,
+            category_by_workout,
         )
 
         planned_workouts, _ = build_rolling_plan_with_state(

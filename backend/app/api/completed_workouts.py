@@ -10,6 +10,7 @@ from ..db.models import CompletedWorkoutRecord
 from ..db.models import PlannerSettingsRecord
 from ..db.repositories import (
     get_completed_workouts,
+    get_completed_workout_by_healthkit_id,
     get_google_calendar_connection,
     get_planned_workouts,
     save_planned_workout_calendar_events,
@@ -24,6 +25,7 @@ from ..schemas.completed_workout import (
     CompletedWorkoutResponse,
     CorrectCompletedWorkoutRequest,
     LogCompletedWorkoutRequest,
+    HealthKitWorkoutRequest,
 )
 from ..schemas.plan import PlannedWorkoutResponse
 from ..schemas.settings import DEFAULT_SETTINGS, PlannerSettings
@@ -171,6 +173,8 @@ def log_workout(
         started_at=request.started_at,
         variant=request.variant,
         rotation_type=request.rotation_type,
+        healthkit_id=request.healthkit_id,
+        source_activity=request.source_activity,
         muscles_trained=tuple(request.muscles_trained) or _muscles_for_workout(session, request.workout_type, request.variant),
         custom_name=request.custom_name,
     )
@@ -202,6 +206,8 @@ def log_workout(
         rotation_type=request.rotation_type,
         google_event_id=completed_event_id,
         google_calendar_id=completed_calendar_id,
+        healthkit_id=request.healthkit_id,
+        source_activity=request.source_activity,
         muscles_trained=tuple(request.muscles_trained) or _muscles_for_workout(session, request.workout_type, request.variant),
         custom_name=request.custom_name,
     )
@@ -250,7 +256,85 @@ def log_workout(
     return planned_workouts
 
 
-# Correct a saved workout and rebuild the pending plan and calendar.
+# Receive Watch workouts automatically and match them against today's plan.
+@router.post(
+    "/completed-workouts/healthkit",
+    response_model=list[PlannedWorkoutResponse],
+)
+def receive_healthkit_workout(
+    payload: HealthKitWorkoutRequest,
+    session: Session = Depends(get_db_session),
+) -> list[PlannedWorkout]:
+    existing = get_completed_workout_by_healthkit_id(session, payload.healthkit_id)
+    if existing is not None:
+        plan = get_planned_workouts(session)
+        session.rollback()
+        return plan
+    plan = get_planned_workouts(session)
+    session.rollback()
+
+    scheduled_today = next(
+        (workout for workout in plan if workout.starts_at.date() == payload.ended_at.date()),
+        None,
+    )
+    activity = payload.activity_type.lower().replace("_", " ")
+    rotation_type = None
+    variant = None
+
+    is_running = "run" in activity
+    is_hiit = "hiit" in activity or "high intensity" in activity
+    is_strength = any(
+        word in activity
+        for word in ("strength", "gymnastic", "cross training")
+    )
+    workout_type = (
+        WorkoutType.RUN if is_running
+        else WorkoutType.HIIT_LEGS if is_hiit
+        else WorkoutType.PUSH
+    )
+
+    if scheduled_today is not None:
+        planned_type = scheduled_today.rotation_type or scheduled_today.workout_type
+        if is_running and planned_type in (WorkoutType.RUN, WorkoutType.HIIT_LEGS):
+            workout_type = WorkoutType.RUN
+            rotation_type = planned_type
+        elif is_hiit and planned_type in (WorkoutType.HIIT_LEGS, WorkoutType.HIIT_ABS):
+            workout_type = scheduled_today.workout_type
+            rotation_type = planned_type
+        elif is_strength and planned_type in (WorkoutType.PUSH, WorkoutType.PULL, WorkoutType.LEGS):
+            workout_type = scheduled_today.workout_type
+            rotation_type = planned_type
+            variant = scheduled_today.variant
+        elif not (is_running or is_hiit or is_strength):
+            workout_type = scheduled_today.workout_type
+            rotation_type = planned_type
+            variant = scheduled_today.variant
+    elif is_running:
+        workout_type = WorkoutType.RUN
+    elif is_hiit:
+        workout_type = WorkoutType.HIIT_LEGS
+
+    request = LogCompletedWorkoutRequest(
+        workout_type=workout_type,
+        completed_at=payload.ended_at,
+        started_at=payload.started_at,
+        variant=variant,
+        rotation_type=rotation_type,
+        first_candidate_start=(
+            payload.ended_at.replace(hour=7, minute=0, second=0, microsecond=0)
+            if payload.ended_at.hour < 7
+            else payload.ended_at.replace(
+                hour=7, minute=0, second=0, microsecond=0
+            ) + timedelta(days=1)
+        ),
+        calendar_events=[],
+        push_uses_rings=False,
+        healthkit_id=payload.healthkit_id,
+        source_activity=f"{payload.activity_type} · {payload.source_name or 'Apple Health'}"[:80],
+    )
+    return log_workout(request, session)
+
+
 # Correct an automatic match and rebuild the pending plan and calendar.
 @router.patch(
     "/completed-workouts/{workout_id}",
@@ -326,6 +410,8 @@ def correct_completed_workout(
             rotation_type=request.rotation_type,
             google_event_id=record.google_event_id,
             google_calendar_id=record.google_calendar_id,
+            healthkit_id=record.healthkit_id,
+            source_activity=record.source_activity,
             id=record.id,
             muscles_trained=tuple(record.muscles_trained or []),
             custom_name=record.custom_name,
@@ -369,6 +455,8 @@ def correct_completed_workout(
         rotation_type=record.rotation_type,
         google_event_id=record.google_event_id,
         google_calendar_id=record.google_calendar_id,
+        healthkit_id=record.healthkit_id,
+        source_activity=record.source_activity,
         id=record.id,
         muscles_trained=tuple(record.muscles_trained or []),
         custom_name=record.custom_name,

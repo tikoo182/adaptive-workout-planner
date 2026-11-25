@@ -40,6 +40,7 @@ class PlannerTimingSettings(BaseModel):
     calendar_buffer_minutes: int = Field(default=60, ge=0, le=240)
     max_consecutive_workout_days: int = Field(default=3, ge=1, le=10)
     muscle_recovery_days: int = Field(default=1, ge=0, le=14)
+    prefer_sunday_runs: bool = False
 
 
 class PlannerSettings(BaseModel):
@@ -72,7 +73,7 @@ DEFAULT_SETTINGS = PlannerSettings(
         WorkoutDefinition(id="hiit_legs", name="HIIT Legs", category="cardio", muscles=["quadriceps", "glutes", "hamstrings"], is_hiit=True),
         WorkoutDefinition(id="push", name="Push", category="strength", variants=["push_dips", "push_pike_russian", "push_dips", "push_pike_weighted", "push_pike_archer"], variant_muscles={"push_dips": ["chest", "shoulders", "triceps"], "push_pike_russian": ["shoulders", "triceps"], "push_pike_weighted": ["shoulders", "triceps"], "push_pike_archer": ["chest", "shoulders", "triceps"]}, variant_uses_rings={"push_dips": True, "push_pike_russian": False, "push_pike_weighted": False, "push_pike_archer": False}, muscles=["chest", "shoulders", "triceps"]),
         WorkoutDefinition(id="run", name="Run", category="cardio", muscles=["quadriceps", "hamstrings", "glutes", "calves"]),
-        WorkoutDefinition(id="legs", name="Legs", category="strength", variants=["legs_lunges", "legs_weighted_situps"], variant_muscles={"legs_lunges": ["quadriceps", "glutes", "hamstrings"], "legs_weighted_situps": ["core"]}, muscles=["quadriceps", "glutes", "hamstrings"]),
+        WorkoutDefinition(id="legs", name="Legs", category="strength", variants=["legs_lunges", "legs_squats"], variant_muscles={"legs_lunges": ["quadriceps", "glutes", "hamstrings"], "legs_squats": ["quadriceps", "glutes", "hamstrings", "core"]}, muscles=["quadriceps", "glutes", "hamstrings"]),
         WorkoutDefinition(id="hiit_abs", name="HIIT Abs", category="cardio", muscles=["core"], is_hiit=True),
         WorkoutDefinition(id="pull", name="Pull", category="strength", variants=["pull_chinups_and_pullups", "pull_dead_hangs_and_abs"], variant_muscles={"pull_chinups_and_pullups": ["back", "biceps", "forearms"], "pull_dead_hangs_and_abs": ["back", "forearms", "core"]}, variant_uses_rings={"pull_chinups_and_pullups": True, "pull_dead_hangs_and_abs": True}, muscles=["back", "biceps", "forearms"], uses_rings=True),
     ],

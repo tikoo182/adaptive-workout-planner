@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .workout_types import WorkoutType
 
@@ -7,3 +7,4 @@ from .workout_types import WorkoutType
 class SchedulerState:
     rotation_cursor: WorkoutType | str | None = None
     replacement_run_due: bool = False
+    rotation_cursors: dict[str, WorkoutType | str] = field(default_factory=dict)

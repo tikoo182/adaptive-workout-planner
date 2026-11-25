@@ -12,6 +12,8 @@ class CompletedWorkout:
     rotation_type: WorkoutType | str | None = None
     google_event_id: str | None = None
     google_calendar_id: str | None = None
+    healthkit_id: str | None = None
+    source_activity: str | None = None
     started_at: datetime | None = None
     id: int | None = None
     muscles_trained: tuple[str, ...] = ()

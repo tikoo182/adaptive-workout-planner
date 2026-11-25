@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ..domain.workout_types import WorkoutType, WorkoutVariant
 from .plan import CalendarEventInput, to_sonora_local_datetime
 
 # Data sent when logging a workout and rebuilding the plan.
@@ -14,6 +15,8 @@ class LogCompletedWorkoutRequest(BaseModel):
     first_candidate_start: datetime
     calendar_events: list[CalendarEventInput] = Field(default_factory=list)
     push_uses_rings: bool = False
+    healthkit_id: str | None = None
+    source_activity: str | None = None
     muscles_trained: list[str] = Field(default_factory=list)
     custom_name: str | None = Field(default=None, max_length=80)
 
@@ -32,8 +35,24 @@ class CompletedWorkoutResponse(BaseModel):
     started_at: datetime | None = None
     variant: str | None = None
     rotation_type: str | None = None
+    healthkit_id: str | None = None
+    source_activity: str | None = None
     muscles_trained: list[str] = Field(default_factory=list)
     custom_name: str | None = None
+
+
+# Workout details uploaded automatically by Apple Health.
+class HealthKitWorkoutRequest(BaseModel):
+    healthkit_id: str
+    activity_type: str
+    started_at: datetime
+    ended_at: datetime
+    source_name: str | None = None
+
+    @field_validator("started_at", "ended_at")
+    @classmethod
+    def use_sonora_local_time(cls, value: datetime) -> datetime:
+        return to_sonora_local_datetime(value)
 
 
 # A correction to the workout's planner classification.

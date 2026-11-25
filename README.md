@@ -5,7 +5,8 @@ A local web app that builds a flexible workout plan around your schedule.
 ## What it does
 
 - Builds a rolling 10-day workout plan from your configurable workout rotation.
-- Uses workout variants, time constraints, calendar conflicts, and recent muscle groups when planning.
+- Balances cardio and strength using recent workouts, avoids recently trained muscles when possible, respects time and calendar conflicts, and can favor Sunday runs.
+- Rebuilds the remaining plan after completed or skipped workouts while filling other available slots in the 10-day window.
 - Logs completed workouts with start and end times, tracks history, and lets you correct workout details.
 - Syncs planned and completed workouts with a selected Google Calendar.
 - Runs as a full stack app with Angular, FastAPI, PostgreSQL, and Docker Compose.

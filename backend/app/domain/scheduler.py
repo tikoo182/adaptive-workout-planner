@@ -14,7 +14,12 @@ from .schedule_rules import (
     MAX_CONSECUTIVE_WORKOUT_DAYS,
     ScheduleRules,
 )
-from .workout_types import WORKOUT_VARIANT_ROTATIONS, WorkoutType, WorkoutVariant
+from .workout_types import (
+    WORKOUT_CATEGORIES,
+    WORKOUT_VARIANT_ROTATIONS,
+    WorkoutType,
+    WorkoutVariant,
+)
 from .planned_workout import PlannedWorkout
 from .completed_workout import CompletedWorkout
 from .skipped_workout import SkippedWorkout
@@ -73,6 +78,9 @@ WORKOUT_ROTATION = (
     WorkoutType.PULL,
 )
 
+# Count recent sessions across the same rolling window as the plan.
+CATEGORY_BALANCE_WINDOW_DAYS = 10
+
 
 # Move to the next workout in the rotation.
 def get_next_workout_type(
@@ -86,6 +94,24 @@ def get_next_workout_type(
     current_position = workout_rotation.index(current_workout_type)
     next_position = (current_position + 1) % len(workout_rotation)
     return workout_rotation[next_position]
+
+
+def _workout_id(workout_type: WorkoutType | str) -> str:
+    return workout_type.value if hasattr(workout_type, "value") else workout_type
+
+
+def _category_for_workout(
+    workout_type: WorkoutType | str,
+    category_by_workout: dict[str, str],
+) -> str:
+    workout_id = _workout_id(workout_type)
+    if workout_id in category_by_workout:
+        return category_by_workout[workout_id]
+    try:
+        category = WORKOUT_CATEGORIES.get(WorkoutType(workout_id))
+        return category.value if category is not None else "strength"
+    except ValueError:
+        return "strength"
 
 
 # Pick the next variation after completed and already planned sessions.
@@ -117,7 +143,7 @@ def get_next_workout_variant(
         return selected
 
 
-# Prefer the next rotation item that repeats the fewest recently trained muscles.
+# Balance workout categories first, then prefer less-recently trained muscles.
 def get_next_workout_with_muscle_preference(
     current_workout_type: WorkoutType | str | None,
     rotation: tuple[WorkoutType | str, ...],
@@ -130,8 +156,59 @@ def get_next_workout_with_muscle_preference(
     variants_by_workout: dict[str, list[str]] | None = None,
     variant_muscles_by_workout: dict[str, dict[str, list[str]]] | None = None,
     push_uses_rings: bool = False,
+    rotation_cursors: dict[str, WorkoutType | str] | None = None,
 ) -> WorkoutType | str:
-    next_type = get_next_workout_type(current_workout_type, rotation)
+    category_by_workout = category_by_workout or {}
+    planned_workouts = planned_workouts or []
+    variants_by_workout = variants_by_workout or {}
+    variant_muscles_by_workout = variant_muscles_by_workout or {}
+    rotation_cursors = rotation_cursors or {}
+
+    category_rotations: dict[str, tuple[WorkoutType | str, ...]] = {}
+    for workout_type in rotation:
+        category = _category_for_workout(workout_type, category_by_workout)
+        category_rotations.setdefault(category, tuple())
+        category_rotations[category] += (workout_type,)
+    if not category_rotations:
+        return get_next_workout_type(current_workout_type, rotation)
+
+    window_start = candidate_date.date() - timedelta(
+        days=CATEGORY_BALANCE_WINDOW_DAYS - 1
+    )
+    category_load = {category: 0.0 for category in category_rotations}
+
+    def add_recent_load(workout_type: WorkoutType | str, workout_date) -> None:
+        # Yesterday counts more than an older session in the 10-day window.
+        age_days = (candidate_date.date() - workout_date).days
+        if 0 <= age_days < CATEGORY_BALANCE_WINDOW_DAYS:
+            category = _category_for_workout(workout_type, category_by_workout)
+            if category in category_load:
+                category_load[category] += CATEGORY_BALANCE_WINDOW_DAYS - age_days
+
+    for workout in completed_workouts:
+        if window_start <= workout.completed_at.date() <= candidate_date.date():
+            add_recent_load(workout.workout_type, workout.completed_at.date())
+    for workout in planned_workouts:
+        if (
+            window_start <= workout.starts_at.date() <= candidate_date.date()
+            and workout.starts_at <= candidate_date
+        ):
+            add_recent_load(workout.workout_type, workout.starts_at.date())
+
+    category_order = list(category_rotations)
+    selected_category = min(
+        category_order,
+        key=lambda category: (
+            category_load[category] / len(category_rotations[category]),
+            category_order.index(category),
+        ),
+    )
+    category_rotation = category_rotations[selected_category]
+    category_cursor = rotation_cursors.get(selected_category)
+    if category_cursor is None and current_workout_type in category_rotation:
+        category_cursor = current_workout_type
+    next_type = get_next_workout_type(category_cursor, category_rotation)
+
     if recovery_days <= 0:
         return next_type
 
@@ -145,24 +222,10 @@ def get_next_workout_with_muscle_preference(
     if not recently_trained:
         return next_type
 
-    start_index = rotation.index(next_type)
-    ordered_candidates = rotation[start_index:] + rotation[:start_index]
-    category_by_workout = category_by_workout or {}
-    planned_workouts = planned_workouts or []
-    variants_by_workout = variants_by_workout or {}
-    variant_muscles_by_workout = variant_muscles_by_workout or {}
-    recent_history = [
-        workout
-        for workout in completed_workouts
-        if recent_cutoff <= workout.completed_at.date() <= candidate_date.date()
-    ]
-    last_category = None
-    if recent_history:
-        latest = max(recent_history, key=lambda workout: workout.completed_at)
-        latest_type = latest.workout_type.value if hasattr(latest.workout_type, "value") else latest.workout_type
-        last_category = category_by_workout.get(latest_type)
+    start_index = category_rotation.index(next_type)
+    ordered_candidates = category_rotation[start_index:] + category_rotation[:start_index]
 
-    def score(workout_type: WorkoutType | str) -> tuple[int, bool, int]:
+    def score(workout_type: WorkoutType | str) -> tuple[int, int]:
         next_variant = get_next_workout_variant(
             workout_type,
             completed_workouts,
@@ -172,14 +235,13 @@ def get_next_workout_with_muscle_preference(
         if workout_type == WorkoutType.PUSH and push_uses_rings:
             next_variant = WorkoutVariant.PUSH_DIPS
         variant_id = next_variant.value if hasattr(next_variant, "value") else next_variant
-        workout_id = workout_type.value if hasattr(workout_type, "value") else workout_type
+        workout_id = _workout_id(workout_type)
         candidate_muscles = variant_muscles_by_workout.get(workout_id, {}).get(
             variant_id,
             muscles_by_workout.get(workout_id, []),
         )
         return (
             len(recently_trained.intersection(candidate_muscles)),
-            category_by_workout.get(workout_id) == last_category,
             ordered_candidates.index(workout_type),
         )
 
@@ -191,9 +253,12 @@ def get_next_workout_with_muscle_preference(
 def get_scheduler_state_from_history(
     completed_workouts: list[CompletedWorkout],
     skipped_workouts: list[SkippedWorkout] | None = None,
+    category_by_workout: dict[str, str] | None = None,
 ) -> SchedulerState:
     rotation_cursor = None
     replacement_run_due = False
+    rotation_cursors: dict[str, WorkoutType | str] = {}
+    category_by_workout = category_by_workout or {}
     history = [
         (workout.completed_at, workout.rotation_type)
         for workout in completed_workouts
@@ -206,6 +271,8 @@ def get_scheduler_state_from_history(
 
     for _, rotation_type in sorted(history, key=lambda item: item[0]):
         rotation_cursor = rotation_type
+        category = _category_for_workout(rotation_type, category_by_workout)
+        rotation_cursors[category] = rotation_type
 
         if rotation_type == WorkoutType.RUN:
             replacement_run_due = True
@@ -215,6 +282,7 @@ def get_scheduler_state_from_history(
     return SchedulerState(
         rotation_cursor=rotation_cursor,
         replacement_run_due=replacement_run_due,
+        rotation_cursors=rotation_cursors,
     )
 
 
@@ -378,10 +446,43 @@ def find_next_available_start_in_plan(
     rules: ScheduleRules | None = None,
     is_hiit: bool = False,
     is_strength: bool = False,
+    prefer_sunday: bool = False,
 ) -> datetime | None:
     rules = rules or ScheduleRules()
     search_start = first_candidate_start
     plan_end_date = first_candidate_start.date() + timedelta(days=rules.plan_horizon_days)
+
+    if prefer_sunday:
+        preferred_day = search_start.date()
+        while preferred_day < plan_end_date:
+            if (
+                preferred_day.weekday() == 6
+                and not any(
+                    workout_start.date() == preferred_day
+                    for workout_start in other_workout_starts
+                )
+            ):
+                sunday_start = (
+                    search_start
+                    if preferred_day == search_start.date()
+                    else datetime.combine(
+                        preferred_day,
+                        rules.earliest_workout_start,
+                    )
+                )
+                sunday_start = find_next_available_start(
+                    sunday_start,
+                    workout_type,
+                    calendar_events,
+                    other_workout_starts,
+                    uses_rings,
+                    rules,
+                    is_hiit,
+                    is_strength,
+                )
+                if sunday_start is not None:
+                    return sunday_start
+            preferred_day += timedelta(days=1)
 
     while search_start.date() < plan_end_date:
         available_start = find_next_available_start(
@@ -520,6 +621,10 @@ def build_rolling_plan_with_state(
     candidate_start = first_candidate_start
     rotation_cursor = state.rotation_cursor
     replacement_run_due = state.replacement_run_due
+    rotation_cursors = dict(state.rotation_cursors)
+    if rotation_cursor is not None and not rotation_cursors:
+        legacy_category = _category_for_workout(rotation_cursor, category_by_workout)
+        rotation_cursors[legacy_category] = rotation_cursor
 
     while candidate_start.date() < plan_end_date:
         skipped_today = next(
@@ -532,6 +637,11 @@ def build_rolling_plan_with_state(
         )
         if skipped_today is not None:
             rotation_cursor = skipped_today.rotation_type
+            skipped_category = _category_for_workout(
+                skipped_today.rotation_type,
+                category_by_workout,
+            )
+            rotation_cursors[skipped_category] = skipped_today.rotation_type
             if rotation_cursor == WorkoutType.RUN:
                 replacement_run_due = True
             elif rotation_cursor == WorkoutType.HIIT_LEGS:
@@ -557,6 +667,7 @@ def build_rolling_plan_with_state(
             variants_by_workout,
             variant_muscles_by_workout,
             push_uses_rings,
+            rotation_cursors,
         )
         is_replacement_run = (
             rotation_type == WorkoutType.HIIT_LEGS
@@ -594,6 +705,7 @@ def build_rolling_plan_with_state(
             rules,
             hiit_by_workout.get(scheduled_type_id, False),
             strength_by_workout.get(scheduled_type_id, False),
+            rules.prefer_sunday_runs and scheduled_type == WorkoutType.RUN,
         )
 
         if available_start is None or available_start.date() >= plan_end_date:
@@ -609,6 +721,11 @@ def build_rolling_plan_with_state(
         )
         if skipped_before_available is not None:
             rotation_cursor = skipped_before_available.rotation_type
+            skipped_category = _category_for_workout(
+                skipped_before_available.rotation_type,
+                category_by_workout,
+            )
+            rotation_cursors[skipped_category] = skipped_before_available.rotation_type
             if rotation_cursor == WorkoutType.RUN:
                 replacement_run_due = True
             elif rotation_cursor == WorkoutType.HIIT_LEGS:
@@ -621,6 +738,127 @@ def build_rolling_plan_with_state(
                 microsecond=0,
             ) + timedelta(days=1)
             continue
+
+        # If this workout moves to another day, use today's free time for the next rotation item.
+        fallback_rotation_type: WorkoutType | str | None = None
+        fallback_replacement_run_due = replacement_run_due
+        if (
+            len(workout_rotation) > 1
+            and available_start.date() > candidate_start.date()
+            and not any(
+                workout.starts_at.date() == candidate_start.date()
+                for workout in workouts_to_check
+            )
+        ):
+            current_category = _category_for_workout(
+                rotation_type,
+                category_by_workout,
+            )
+            category_rotation = tuple(
+                item
+                for item in workout_rotation
+                if _category_for_workout(item, category_by_workout)
+                == current_category
+            )
+            next_rotation_type = get_next_workout_type(
+                rotation_type,
+                category_rotation,
+            )
+            replacement_run_due_after_current = replacement_run_due
+            if is_replacement_run:
+                replacement_run_due_after_current = False
+            elif rotation_type == WorkoutType.RUN:
+                replacement_run_due_after_current = True
+
+            fallback_is_replacement_run = (
+                next_rotation_type == WorkoutType.HIIT_LEGS
+                and replacement_run_due_after_current
+            )
+            fallback_scheduled_type = (
+                WorkoutType.RUN
+                if fallback_is_replacement_run
+                else next_rotation_type
+            )
+            fallback_variant = get_next_workout_variant(
+                fallback_scheduled_type,
+                completed_workouts,
+                workouts_to_check,
+                variants_by_workout,
+            )
+            if (
+                fallback_scheduled_type == WorkoutType.PUSH
+                and push_uses_rings
+            ):
+                fallback_variant = WorkoutVariant.PUSH_DIPS
+
+            fallback_type_id = (
+                fallback_scheduled_type.value
+                if hasattr(fallback_scheduled_type, "value")
+                else fallback_scheduled_type
+            )
+            fallback_variant_id = (
+                fallback_variant.value
+                if hasattr(fallback_variant, "value")
+                else fallback_variant
+            )
+            fallback_uses_rings = variant_uses_rings_by_workout.get(
+                fallback_type_id,
+                {},
+            ).get(
+                fallback_variant_id,
+                uses_rings_by_workout.get(
+                    fallback_type_id,
+                    fallback_scheduled_type == WorkoutType.PULL,
+                ),
+            )
+            if (
+                rules.prefer_sunday_runs
+                and fallback_scheduled_type == WorkoutType.RUN
+            ):
+                fallback_start = find_next_available_start_in_plan(
+                    candidate_start,
+                    fallback_scheduled_type,
+                    calendar_events,
+                    other_workout_starts,
+                    fallback_uses_rings,
+                    rules,
+                    hiit_by_workout.get(fallback_type_id, False),
+                    strength_by_workout.get(fallback_type_id, False),
+                    prefer_sunday=True,
+                )
+            else:
+                fallback_start = find_next_available_start(
+                    candidate_start,
+                    fallback_scheduled_type,
+                    calendar_events,
+                    other_workout_starts,
+                    fallback_uses_rings,
+                    rules,
+                    hiit_by_workout.get(fallback_type_id, False),
+                    strength_by_workout.get(fallback_type_id, False),
+                )
+
+            if (
+                fallback_start is not None
+                and fallback_start.date() == candidate_start.date()
+            ):
+                fallback_workout = PlannedWorkout(
+                    workout_type=fallback_scheduled_type,
+                    starts_at=fallback_start,
+                    uses_rings=fallback_uses_rings,
+                    variant=fallback_variant,
+                    rotation_type=next_rotation_type,
+                    duration_minutes=rules.workout_duration_minutes,
+                )
+                planned_workouts.append(fallback_workout)
+                workouts_to_check.append(fallback_workout)
+                fallback_rotation_type = next_rotation_type
+                rotation_cursors[current_category] = next_rotation_type
+                fallback_replacement_run_due = replacement_run_due_after_current
+                if fallback_is_replacement_run:
+                    fallback_replacement_run_due = False
+                elif next_rotation_type == WorkoutType.RUN:
+                    fallback_replacement_run_due = True
 
         if any(
             workout.starts_at.date() == available_start.date()
@@ -645,21 +883,46 @@ def build_rolling_plan_with_state(
         planned_workouts.append(workout)
         workouts_to_check.append(workout)
 
-        if is_replacement_run:
-            replacement_run_due = False
-        elif rotation_type == WorkoutType.RUN:
-            replacement_run_due = True
+        if fallback_rotation_type is not None:
+            rotation_cursor = fallback_rotation_type
+            replacement_run_due = fallback_replacement_run_due
+        else:
+            if is_replacement_run:
+                replacement_run_due = False
+            elif rotation_type == WorkoutType.RUN:
+                replacement_run_due = True
 
-        rotation_cursor = rotation_type
+            rotation_cursor = rotation_type
+            rotation_category = _category_for_workout(
+                rotation_type,
+                category_by_workout,
+            )
+            rotation_cursors[rotation_category] = rotation_type
+        keep_searching_before_preferred_run = (
+            rules.prefer_sunday_runs
+            and scheduled_type == WorkoutType.RUN
+            and available_start.weekday() == 6
+            and available_start.date() > candidate_start.date()
+        )
+        next_search_day = (
+            candidate_start.date() + timedelta(days=1)
+            if keep_searching_before_preferred_run
+            else available_start.date() + timedelta(days=1)
+        )
         candidate_start = available_start.replace(
             hour=rules.earliest_workout_start.hour,
             minute=rules.earliest_workout_start.minute,
             second=0,
             microsecond=0,
-        ) + timedelta(days=1)
+        ).replace(
+            year=next_search_day.year,
+            month=next_search_day.month,
+            day=next_search_day.day,
+        )
 
     updated_state = SchedulerState(
         rotation_cursor=rotation_cursor,
         replacement_run_due=replacement_run_due,
+        rotation_cursors=rotation_cursors,
     )
     return planned_workouts, updated_state

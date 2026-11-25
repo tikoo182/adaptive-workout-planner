@@ -35,6 +35,7 @@ class ScheduleRules:
     plan_horizon_days: int = PLAN_HORIZON_DAYS
     max_consecutive_workout_days: int = MAX_CONSECUTIVE_WORKOUT_DAYS
     reschedule_interval_minutes: int = RESCHEDULE_INTERVAL_MINUTES
+    prefer_sunday_runs: bool = False
 
     @classmethod
     def from_settings(cls, values: dict) -> "ScheduleRules":
@@ -48,4 +49,5 @@ class ScheduleRules:
             workout_duration_minutes=values["workout_duration_minutes"],
             event_buffer_minutes=values["calendar_buffer_minutes"],
             max_consecutive_workout_days=values["max_consecutive_workout_days"],
+            prefer_sunday_runs=values.get("prefer_sunday_runs", False),
         )

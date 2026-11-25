@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -35,6 +35,10 @@ class PlannedWorkoutRecord(Base):
 # Database record for a completed workout.
 class CompletedWorkoutRecord(Base):
     __tablename__ = "completed_workouts"
+    __table_args__ = (
+        UniqueConstraint("healthkit_id", name="uq_completed_workouts_healthkit_id"),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     workout_type: Mapped[str] = mapped_column(String(32), nullable=False)
     rotation_type: Mapped[str | None] = mapped_column(
@@ -56,6 +60,14 @@ class CompletedWorkoutRecord(Base):
     )
     google_calendar_id: Mapped[str | None] = mapped_column(
         String(255),
+        nullable=True,
+    )
+    healthkit_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+    )
+    source_activity: Mapped[str | None] = mapped_column(
+        String(80),
         nullable=True,
     )
     muscles_trained: Mapped[list[str]] = mapped_column(

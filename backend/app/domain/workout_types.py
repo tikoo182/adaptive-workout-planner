@@ -42,7 +42,7 @@ class WorkoutVariant(StrEnum):
     PULL_CHINUPS_AND_PULLUPS = "pull_chinups_and_pullups"
     PULL_DEAD_HANGS_AND_ABS = "pull_dead_hangs_and_abs"
     LEGS_LUNGES = "legs_lunges"
-    LEGS_WEIGHTED_SITUPS = "legs_weighted_situps"
+    LEGS_SQUATS = "legs_squats"
 
 
 # The order each workout category uses to rotate through its variations.
@@ -60,6 +60,6 @@ WORKOUT_VARIANT_ROTATIONS = {
     ),
     WorkoutType.LEGS: (
         WorkoutVariant.LEGS_LUNGES,
-        WorkoutVariant.LEGS_WEIGHTED_SITUPS,
+        WorkoutVariant.LEGS_SQUATS,
     ),
 }

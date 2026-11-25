@@ -319,6 +319,8 @@
 .muscle-picker label.time-toggle { display: inline-flex; }
 .muscle-picker input[type='checkbox'] { width: 17px; height: 17px; }
 .timing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.sunday-run-setting { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-weight: 600; }
+.sunday-run-setting input[type='checkbox'] { width: 18px; height: 18px; }
 .rotation-row,
 .settings-actions { display: flex; align-items: center; gap: 8px; }
 .rotation-row { justify-content: flex-end; }

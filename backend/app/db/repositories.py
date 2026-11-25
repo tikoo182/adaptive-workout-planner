@@ -58,6 +58,8 @@ def save_completed_workout(
         completed_at=workout.completed_at,
         google_event_id=workout.google_event_id,
         google_calendar_id=workout.google_calendar_id,
+        healthkit_id=workout.healthkit_id,
+        source_activity=workout.source_activity,
         muscles_trained=list(workout.muscles_trained),
         custom_name=workout.custom_name,
     )
@@ -70,8 +72,8 @@ def save_completed_workout(
 def get_completed_workouts(session: Session) -> list[CompletedWorkout]:
     records = session.scalars(
         select(CompletedWorkoutRecord).order_by(
-            CompletedWorkoutRecord.completed_at,
-            CompletedWorkoutRecord.id,
+            CompletedWorkoutRecord.completed_at.desc(),
+            CompletedWorkoutRecord.id.desc(),
         )
     ).all()
 
@@ -91,6 +93,8 @@ def get_completed_workouts(session: Session) -> list[CompletedWorkout]:
             ),
             google_event_id=record.google_event_id,
             google_calendar_id=record.google_calendar_id,
+            healthkit_id=record.healthkit_id,
+            source_activity=record.source_activity,
             id=record.id,
             muscles_trained=tuple(record.muscles_trained or []),
             custom_name=record.custom_name,
@@ -98,6 +102,37 @@ def get_completed_workouts(session: Session) -> list[CompletedWorkout]:
         for record in records
     ]
 
+
+# Find a completed HealthKit workout so retries do not create duplicates.
+def get_completed_workout_by_healthkit_id(
+    session: Session,
+    healthkit_id: str,
+) -> CompletedWorkout | None:
+    record = session.scalar(
+        select(CompletedWorkoutRecord).where(
+            CompletedWorkoutRecord.healthkit_id == healthkit_id
+        )
+    )
+    if record is None:
+        return None
+    return CompletedWorkout(
+        workout_type=_completed_type(record.workout_type),
+        rotation_type=(
+            _rotation_type(record.rotation_type)
+            if record.rotation_type is not None
+            else None
+        ),
+        completed_at=record.completed_at,
+        started_at=record.started_at,
+        variant=_completed_variant(record.variant),
+        google_event_id=record.google_event_id,
+        google_calendar_id=record.google_calendar_id,
+        healthkit_id=record.healthkit_id,
+        source_activity=record.source_activity,
+        id=record.id,
+        muscles_trained=tuple(record.muscles_trained or []),
+        custom_name=record.custom_name,
+    )
 
 # Save one planned workout without committing the whole transaction.
 def save_planned_workout(

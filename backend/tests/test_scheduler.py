@@ -144,7 +144,7 @@ class BuildRollingPlanTests(unittest.TestCase):
             actual_variants,
             [
                 WorkoutVariant.LEGS_LUNGES,
-                WorkoutVariant.LEGS_WEIGHTED_SITUPS,
+                WorkoutVariant.LEGS_SQUATS,
             ],
         )
 

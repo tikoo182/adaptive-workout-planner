@@ -1,4 +1,5 @@
 import { DatePipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
@@ -40,6 +41,7 @@ export class App implements OnInit, OnDestroy {
   private readonly planService = inject(PlanService);
   private rescheduleTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly rescheduleIntervalMs = 60 * 60 * 1000;
+  private readonly rescheduleRetryDelayMs = 5 * 60 * 1000;
 
   protected workoutType = '';
   protected rotationType = '';
@@ -110,7 +112,7 @@ export class App implements OnInit, OnDestroy {
 
     this.isRebuilding.set(true);
     this.errorMessage.set('');
-    this.planService.rebuildPlan(this.tomorrowAtSeven()).subscribe({
+    this.planService.rebuildPlan(this.nextRefreshCandidateStart()).subscribe({
       next: (plan) => {
         this.workouts.set(plan);
         this.isRebuilding.set(false);
@@ -189,11 +191,29 @@ export class App implements OnInit, OnDestroy {
         this.errorMessage.set('');
         this.scheduleRescheduleCheck(plan);
       },
-      error: () =>
+      error: (error: HttpErrorResponse) => {
+        const apiDetail =
+          typeof error.error?.detail === 'string' ? error.error.detail : '';
+        const status = error.status ? ` (HTTP ${error.status})` : '';
         this.errorMessage.set(
-          'Could not reschedule the workout. Check the API.',
-        ),
+          apiDetail
+            ? `Could not reschedule the workout: ${apiDetail} Retrying in 5 minutes.`
+            : `Could not reschedule the workout${status}. Retrying in 5 minutes.`,
+        );
+        this.scheduleMissedWorkoutRetry(firstCandidateStart);
+      },
     });
+  }
+
+  // Retry a failed automatic reschedule without losing the workout.
+  private scheduleMissedWorkoutRetry(firstCandidateStart: string): void {
+    this.rescheduleTimer = setTimeout(() => {
+      this.rescheduleTimer = undefined;
+      const retryStart = this.getNextCandidateStart(
+        new Date(firstCandidateStart),
+      );
+      this.rebuildAfterMissedWorkout(retryStart);
+    }, this.rescheduleRetryDelayMs);
   }
 
   // Load completed workouts from the backend.
@@ -481,6 +501,25 @@ export class App implements OnInit, OnDestroy {
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(7, 0, 0, 0);
     return this.toLocalDateTime(tomorrow);
+  }
+
+  // Start a manual refresh in the next available hour today when possible.
+  private nextRefreshCandidateStart(): string {
+    const now = new Date();
+    const candidate = new Date(now);
+    candidate.setMinutes(0, 0, 0);
+
+    if (candidate < now) {
+      candidate.setHours(candidate.getHours() + 1);
+    }
+    if (candidate.getHours() < 7) {
+      candidate.setHours(7, 0, 0, 0);
+    }
+    if (candidate.getHours() > 20) {
+      return this.tomorrowAtSeven();
+    }
+
+    return this.toLocalDateTime(candidate);
   }
 
   // Save the workout, rebuild the plan, and refresh history.
